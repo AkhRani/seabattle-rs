@@ -1,5 +1,5 @@
 [package]
-name = "RustSeawar"
+name = "rust_seawar"
 version = "0.1.0"
 authors = ["Kevin Hart <kevin.kevinhart@gmail.com>"]
 
