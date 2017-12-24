@@ -1,5 +1,9 @@
-const WIDTH: usize = 8;
-const HEIGHT: usize = 8;
+extern crate rand;
+
+use rand::Rng;
+
+const WIDTH: usize = 20;
+const HEIGHT: usize = 20;
 
 struct Position {
     x: usize,
@@ -46,11 +50,47 @@ fn print_map(entities: &Vec<Entity>) {
 
 fn setup() -> Vec<Entity> {
     let mut entities = Vec::new();
+
+    // Island Bitmap
+    let island = [
+        0, 1, 1, 1, 0, 0,
+        0, 1, 1, 1, 1, 0,
+        1, 1, 1, 0, 1, 1,
+        1, 1, 0, 0, 0, 1,
+        1, 1, 0, 0, 1, 1,
+        0, 1, 1, 0, 1, 0,
+        0, 0, 1, 0, 0, 0,
+    ];
+    let mut i = 0;
+    for y in 7..14 {
+        for x in 7..13 {
+            if island[i] == 1 {
+                entities.push(
+                    Entity {
+                        pos: Position {x, y},
+                        etype: EType::Island,
+                    });
+            }
+            i += 1;
+        }
+    }
+
     entities.push(
         Entity {
-            pos: Position { x: 5, y: 1},
-            etype: EType::Ship,
+            pos: Position { x: 10, y: 10},
+            etype: EType::Player,
         });
+
+    let mut rng = rand::thread_rng();
+    for s in 0..rng.gen_range(15, 31) {
+        let x = rng.gen_range(0, WIDTH);
+        let y = rng.gen_range(0, HEIGHT);
+        entities.push(
+            Entity {
+                pos: Position {x, y},
+                etype: EType::Ship,
+            });
+    }
     entities
 }
 
