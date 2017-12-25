@@ -22,6 +22,18 @@ enum EType {
 struct Entity {
     pos: Position,
     etype: EType,
+    alive: bool,
+}
+
+impl Entity {
+    // syntactic sugar
+    fn new(x: usize, y: usize, etype: EType) -> Entity {
+        Entity {
+            pos: Position {x, y},
+            etype,
+            alive: true,
+        }
+    }
 }
 
 fn print_map(entities: &Vec<Entity>) {
@@ -65,32 +77,22 @@ fn setup() -> Vec<Entity> {
     for y in 7..14 {
         for x in 7..13 {
             if island[i] == 1 {
-                entities.push(
-                    Entity {
-                        pos: Position {x, y},
-                        etype: EType::Island,
-                    });
+                entities.push(Entity::new(x, y, EType::Island));
             }
             i += 1;
         }
     }
 
-    entities.push(
-        Entity {
-            pos: Position { x: 10, y: 10},
-            etype: EType::Player,
-        });
+    entities.push(Entity::new(10, 10, EType::Player));
+
 
     let mut rng = rand::thread_rng();
     for s in 0..rng.gen_range(15, 31) {
         let x = rng.gen_range(0, WIDTH);
         let y = rng.gen_range(0, HEIGHT);
-        entities.push(
-            Entity {
-                pos: Position {x, y},
-                etype: EType::Ship,
-            });
+        entities.push(Entity::new(x, y, EType::Ship));
     }
+
     entities
 }
 
