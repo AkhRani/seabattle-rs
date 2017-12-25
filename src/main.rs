@@ -5,6 +5,7 @@ use rand::Rng;
 const WIDTH: usize = 20;
 const HEIGHT: usize = 20;
 
+#[derive(PartialEq, Eq)]
 struct Position {
     x: usize,
     y: usize,
@@ -60,6 +61,28 @@ fn print_map(entities: &Vec<Entity>) {
     println!("{}", ".".repeat(WIDTH*3+2));
 }
 
+fn check_collision(entities: &Vec<Entity>, x:usize, y:usize) -> bool {
+    for e in entities {
+        // Why doesn't this work? if Position{x, y} == e.pos {
+        let pos = Position{x, y};
+        if pos == e.pos {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn place_random(entities: &mut Vec<Entity>, rng: &mut rand::ThreadRng, etype: EType) {
+    loop {
+        let x = rng.gen_range(0, WIDTH);
+        let y = rng.gen_range(0, HEIGHT);
+        if !check_collision(entities, x, y) {
+            entities.push(Entity::new(x, y, etype));
+            return;
+        }
+    }
+}
+
 fn setup() -> Vec<Entity> {
     let mut entities = Vec::new();
 
@@ -83,22 +106,33 @@ fn setup() -> Vec<Entity> {
         }
     }
 
+    // Player
     entities.push(Entity::new(10, 10, EType::Player));
 
-
+    // Enemy Ships
     let mut rng = rand::thread_rng();
-    for s in 0..rng.gen_range(15, 31) {
-        let x = rng.gen_range(0, WIDTH);
-        let y = rng.gen_range(0, HEIGHT);
-        entities.push(Entity::new(x, y, EType::Ship));
+    for _i in 0..rng.gen_range(15, 31) {
+        place_random(&mut entities, &mut rng, EType::Ship);
     }
+
+    // HQ
+    place_random(&mut entities, &mut rng, EType::HQ);
+
+    // Mines
+    for _i in 0..rng.gen_range(8, 15) {
+        place_random(&mut entities, &mut rng, EType::Mine);
+    }
+
+    // Sea Monsters
+    for _i in 0..4 {
+        place_random(&mut entities, &mut rng, EType::Monster);
+    }
+
 
     entities
 }
 
 fn main() {
-    println!("Hello, world!");
-    // let mut entities: Vec<Entity> = Vec::new();
     let entities = setup();
     print_map(&entities);
 }
