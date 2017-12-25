@@ -11,6 +11,7 @@ struct Position {
     y: usize,
 }
 
+#[derive(PartialEq)]
 enum EType {
     Player,
     Island,
@@ -20,10 +21,15 @@ enum EType {
     Monster
 }
 
+enum Component {
+    Velocity(i8, i8),
+}
+
 struct Entity {
     pos: Position,
     etype: EType,
     alive: bool,
+    components: Vec<Component>
 }
 
 impl Entity {
@@ -33,6 +39,7 @@ impl Entity {
             pos: Position {x, y},
             etype,
             alive: true,
+            components: Vec::new(),
         }
     }
 }
@@ -40,6 +47,7 @@ impl Entity {
 fn print_map(entities: &Vec<Entity>) {
     let mut tiles = [["   "; WIDTH]; HEIGHT];
     for e in entities {
+        // TODO:  Sonar noise
         tiles[e.pos.x][e.pos.y] = match e.etype {
             EType::Player => "(X)",
             EType::Island => "***",
@@ -128,6 +136,18 @@ fn setup() -> Vec<Entity> {
         place_random(&mut entities, &mut rng, EType::Monster);
     }
 
+    // Add components to entities
+    for mut e in &entities {
+        if e.etype == EType::Ship || e.etype == EType::Monster {
+            println!("{}", rng.gen_range(-1,2));
+            /*
+            e.components.push(Component::Velocity (
+                rng.gen_range(-1, 1),
+                rng.gen_range(-1, 1),
+            ));
+            */
+        }
+    }
 
     entities
 }
