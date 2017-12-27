@@ -51,7 +51,7 @@ fn print_map(entities: &Vec<Entity>) {
         tiles[e.pos.x][e.pos.y] = match e.etype {
             EType::Player => "(X)",
             EType::Island => "***",
-            EType::Ship => "\\S/",
+            EType::Ship => "\\#/",
             EType::Mine => " $ ",
             EType::HQ => "-H-",
             EType::Monster => "SSS",
@@ -80,13 +80,12 @@ fn check_collision(entities: &Vec<Entity>, x:usize, y:usize) -> bool {
     return false;
 }
 
-fn place_random(entities: &mut Vec<Entity>, rng: &mut rand::ThreadRng, etype: EType) {
+fn place_random(entities: &Vec<Entity>, rng: &mut rand::ThreadRng, etype: EType) -> Entity {
     loop {
         let x = rng.gen_range(0, WIDTH);
         let y = rng.gen_range(0, HEIGHT);
         if !check_collision(entities, x, y) {
-            entities.push(Entity::new(x, y, etype));
-            return;
+            return Entity::new(x, y, etype);
         }
     }
 }
@@ -120,39 +119,68 @@ fn setup() -> Vec<Entity> {
     // Enemy Ships
     let mut rng = rand::thread_rng();
     for _i in 0..rng.gen_range(15, 31) {
-        place_random(&mut entities, &mut rng, EType::Ship);
+        let ship = place_random(&entities, &mut rng, EType::Ship);
+        entities.push(ship);
     }
 
     // HQ
-    place_random(&mut entities, &mut rng, EType::HQ);
+    let hq = place_random(&entities, &mut rng, EType::HQ);
+    entities.push(hq);
 
     // Mines
     for _i in 0..rng.gen_range(8, 15) {
-        place_random(&mut entities, &mut rng, EType::Mine);
+        let mine = place_random(&entities, &mut rng, EType::Mine);
+        entities.push(mine);
     }
 
     // Sea Monsters
     for _i in 0..4 {
-        place_random(&mut entities, &mut rng, EType::Monster);
+        let monster = place_random(&entities, &mut rng, EType::Monster);
+        entities.push(monster);
     }
 
     // Add components to entities
-    for mut e in &entities {
+    for e in &mut entities {
         if e.etype == EType::Ship || e.etype == EType::Monster {
-            println!("{}", rng.gen_range(-1,2));
-            /*
             e.components.push(Component::Velocity (
                 rng.gen_range(-1, 1),
                 rng.gen_range(-1, 1),
             ));
-            */
         }
     }
 
     entities
 }
 
+fn move_ships(entities: &mut Vec<Entity>) {
+    check_collision(entities, 10, 10);
+    // for e in &mut entities {
+    // for e in entities {
+    for e in entities.iter_mut() {
+        if e.etype == EType::Ship {
+            for c in &e.components {
+                // if let Component::Velocity(dx, dy) = c {
+                let Component::Velocity(dx, dy) = *c;
+                    let x = e.pos.x.wrapping_add(dx as usize);
+                    let y = e.pos.y.wrapping_add(dy as usize);
+                    if x >= WIDTH || y >= WIDTH {
+                        // TODO:  Bounce
+                        println!("thud");
+                    /*
+                    } else if check_collision(entities, x, y) {
+                        println!("bang");
+                        */
+                    } else {
+                        e.pos = Position {x, y};
+                    }
+            }
+        }
+    }
+}
+
 fn main() {
-    let entities = setup();
+    let mut entities = setup();
+    print_map(&entities);
+    move_ships(&mut entities);
     print_map(&entities);
 }
