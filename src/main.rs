@@ -153,29 +153,66 @@ fn setup() -> Vec<Entity> {
 }
 
 fn move_ships(entities: &mut Vec<Entity>) {
-    check_collision(entities, 10, 10);
-    // for e in &mut entities {
-    // for e in entities {
-    for e in entities.iter_mut() {
-        if e.etype == EType::Ship {
-            for c in &e.components {
-                // if let Component::Velocity(dx, dy) = c {
-                let Component::Velocity(dx, dy) = *c;
-                    let x = e.pos.x.wrapping_add(dx as usize);
-                    let y = e.pos.y.wrapping_add(dy as usize);
-                    if x >= WIDTH || y >= WIDTH {
-                        // TODO:  Bounce
-                        println!("thud");
-                    /*
-                    } else if check_collision(entities, x, y) {
-                        println!("bang");
-                        */
-                    } else {
-                        e.pos = Position {x, y};
-                    }
-            }
+    // If I create an unmoved / blocked / moved enum
+    // and put it in the Entity, can I do this all in-place?
+    // let blocked = Vec::new();
+    let mut moved = Vec::new();
+
+    /* This doesn't work, "cannot move out of borrowed context"
+    entities.retain(|&e|  {
+        if e.components.is_empty() {
+            moved.push(e);      // try e.clone()?
+            false
+        } else {
+            true
+        }
+    });
+    */
+    let mut i = 0;
+    while i != entities.len() {
+        // TODO:  If more components are added, check for Velocity.
+        if entities[i].components.is_empty() {
+            moved.push(entities.remove(i));
+        } else {
+            i += 1;
         }
     }
+
+    while entities.len() != 0 {
+        // For each (unmoved) entity
+        let mut i = 0;
+        let starting_len = entities.len();
+        while i != entities.len() {
+            // Calculate destination
+            // let &mut vel : Component::Velocity = entities[i].components[0];
+            let Component::Velocity(dx, dy) = entities[i].components[0];
+            let x = entities[i].pos.x.wrapping_add(dx as usize);
+            let y = entities[i].pos.y.wrapping_add(dy as usize);
+            if x >= WIDTH || y >= WIDTH {
+                // TODO:  Bounce
+                println!("thud");
+                moved.push(entities.remove(i));
+            } else if check_collision(entities, x, y) {
+                // If collision in unmoved, leave unmoved for now
+                i += 1;
+            } else if check_collision(&moved, x, y) {
+                // If collision in moved, can't move.
+                // TODO:  ship collision, monster fun, etc.
+                println!("bang");
+                moved.push(entities.remove(i));
+            } else {
+                // No collision, move.
+                entities[i].pos = Position {x, y};
+                moved.push(entities.remove(i));
+            }
+        }
+        if starting_len == entities.len() {
+            // Movement blocked, give up
+            println!("stalemate!");
+            break;
+        }
+    }
+    entities.extend(moved.drain(..));
 }
 
 fn main() {
