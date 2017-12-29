@@ -11,7 +11,7 @@ struct Position {
     y: usize,
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 enum EType {
     Player,
     Island,
@@ -81,6 +81,16 @@ fn print_map(entities: &Vec<Entity>) {
         println!(".");
     }
     println!("{}", ".".repeat(WIDTH*3+2));
+}
+
+fn get_collision(entities: &Vec<Entity>, x:usize, y:usize) -> Option<Entity> {
+    for e in entities {
+        let pos = Position{x, y};
+        if pos == e.pos {
+            return Some(e.clone());
+        }
+    }
+    None
 }
 
 fn check_collision(entities: &Vec<Entity>, x:usize, y:usize) -> bool {
@@ -162,7 +172,7 @@ fn move_ships(entities: &mut Vec<Entity>) {
 
     entities.retain(|e|  {
         if e.components.is_empty() {
-            moved.push(e.clone());      // try e.clone()?
+            moved.push(e.clone());
             false
         } else {
             true
@@ -176,9 +186,15 @@ fn move_ships(entities: &mut Vec<Entity>) {
         while i != entities.len() {
             // Calculate destination
             // let &mut vel : Component::Velocity = entities[i].components[0];
+            let mover = &mut entities[i];
+            /*
             let Component::Velocity(dx, dy) = entities[i].components[0];
             let x = entities[i].pos.x.wrapping_add(dx as usize);
             let y = entities[i].pos.y.wrapping_add(dy as usize);
+            */
+            let Component::Velocity(dx, dy) = mover.components[0];
+            let x = mover.pos.x.wrapping_add(dx as usize);
+            let y = mover.pos.y.wrapping_add(dy as usize);
             if x >= WIDTH || y >= WIDTH {
                 // TODO:  Bounce
                 println!("thud");
@@ -186,15 +202,23 @@ fn move_ships(entities: &mut Vec<Entity>) {
             } else if check_collision(entities, x, y) {
                 // If collision in unmoved, leave unmoved for now
                 i += 1;
-            } else if check_collision(&moved, x, y) {
-                // If collision in moved, can't move.
-                // TODO:  ship collision, monster fun, etc.
-                println!("bang");
-                moved.push(entities.remove(i));
             } else {
-                // No collision, move.
-                entities[i].pos = Position {x, y};
-                moved.push(entities.remove(i));
+                // let opt = get_collision(&moved, x, y);
+                // match opt {
+                match get_collision(&moved, x, y) {
+                    Some(crashee) => {
+                        // If collision in moved, can't move.
+                        // TODO:  ship collision, monster fun, etc.
+                        if 
+                        println!("bang, hit {:?}", crashee.etype);
+                        moved.push(entities.remove(i));
+                    }
+                    None => {
+                        // No collision, move.
+                        entities[i].pos = Position {x, y};
+                        moved.push(entities.remove(i));
+                    }
+                }
             }
         }
         if starting_len == entities.len() {
