@@ -5,13 +5,13 @@ use rand::Rng;
 const WIDTH: usize = 20;
 const HEIGHT: usize = 20;
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone)]
 struct Position {
     x: usize,
     y: usize,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 enum EType {
     Player,
     Island,
@@ -21,10 +21,24 @@ enum EType {
     Monster
 }
 
+#[derive(Clone)]
 enum Component {
     Velocity(i8, i8),
 }
 
+impl Component {
+    fn new_vel(rng : &mut rand::ThreadRng) -> Component {
+        let mut dx = 0;
+        let mut dy = 0;
+        while dx == 0 && dy == 0 {
+            dx = rng.gen_range(-1, 1);
+            dy = rng.gen_range(-1, 1);
+        }
+        Component::Velocity(dx, dy)
+    }
+}
+
+#[derive(Clone)]
 struct Entity {
     pos: Position,
     etype: EType,
@@ -119,7 +133,8 @@ fn setup() -> Vec<Entity> {
     // Enemy Ships
     let mut rng = rand::thread_rng();
     for _i in 0..rng.gen_range(15, 31) {
-        let ship = place_random(&entities, &mut rng, EType::Ship);
+        let mut ship = place_random(&entities, &mut rng, EType::Ship);
+        ship.components.push(Component::new_vel(&mut rng));
         entities.push(ship);
     }
 
@@ -135,53 +150,29 @@ fn setup() -> Vec<Entity> {
 
     // Sea Monsters
     for _i in 0..4 {
-        let monster = place_random(&entities, &mut rng, EType::Monster);
+        let mut monster = place_random(&entities, &mut rng, EType::Monster);
+        monster.components.push(Component::new_vel(&mut rng));
         entities.push(monster);
     }
-
-    // Add components to entities
-    for e in &mut entities {
-        if e.etype == EType::Ship || e.etype == EType::Monster {
-            e.components.push(Component::Velocity (
-                rng.gen_range(-1, 1),
-                rng.gen_range(-1, 1),
-            ));
-        }
-    }
-
     entities
 }
 
 fn move_ships(entities: &mut Vec<Entity>) {
-    // If I create an unmoved / blocked / moved enum
-    // and put it in the Entity, can I do this all in-place?
-    // let blocked = Vec::new();
     let mut moved = Vec::new();
 
-    /* This doesn't work, "cannot move out of borrowed context"
-    entities.retain(|&e|  {
+    entities.retain(|e|  {
         if e.components.is_empty() {
-            moved.push(e);      // try e.clone()?
+            moved.push(e.clone());      // try e.clone()?
             false
         } else {
             true
         }
     });
-    */
-    let mut i = 0;
-    while i != entities.len() {
-        // TODO:  If more components are added, check for Velocity.
-        if entities[i].components.is_empty() {
-            moved.push(entities.remove(i));
-        } else {
-            i += 1;
-        }
-    }
 
     while entities.len() != 0 {
+        let starting_len = entities.len();
         // For each (unmoved) entity
         let mut i = 0;
-        let starting_len = entities.len();
         while i != entities.len() {
             // Calculate destination
             // let &mut vel : Component::Velocity = entities[i].components[0];
