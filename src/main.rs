@@ -27,12 +27,12 @@ enum Component {
 }
 
 impl Component {
-    fn new_vel(rng : &mut rand::ThreadRng) -> Component {
+    fn new_vel() -> Component {
         let mut dx = 0;
         let mut dy = 0;
         while dx == 0 && dy == 0 {
-            dx = rng.gen_range(-1, 1);
-            dy = rng.gen_range(-1, 1);
+            dx = rand::thread_rng().gen_range(-1, 1);
+            dy = rand::thread_rng().gen_range(-1, 1);
         }
         Component::Velocity(dx, dy)
     }
@@ -146,7 +146,7 @@ fn setup() -> EntityColl {
     let mut rng = rand::thread_rng();
     for _i in 0..rng.gen_range(15, 31) {
         let mut ship = place_random(&entities, &mut rng, EType::Ship);
-        ship.components.push(Component::new_vel(&mut rng));
+        ship.components.push(Component::new_vel());
         entities.push_back(ship);
     }
 
@@ -163,7 +163,7 @@ fn setup() -> EntityColl {
     // Sea Monsters
     for _i in 0..4 {
         let mut monster = place_random(&entities, &mut rng, EType::Monster);
-        monster.components.push(Component::new_vel(&mut rng));
+        monster.components.push(Component::new_vel());
         entities.push_back(monster);
     }
     entities
@@ -184,10 +184,24 @@ fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) {
     } else {
         match get_collision(&moved, x, y) {
             Some(crashee) => {
-                // If collision in moved, can't move.
-                // TODO:  ship collision, monster fun, etc.
-                println!("bang, hit {:?}", crashee.etype);
-                moved.push_back(e);
+                // If collision in moved, we have a conflict
+                use EType::*;
+                match crashee.etype {
+                    Island | Ship | Player | HQ => {
+                        println!("{:?} changed direction to avoid {:?}",
+                                 e.etype, crashee.etype);
+                        let mut e = e;
+                        e.components[0] = Component::new_vel();
+                        unmoved.push_back(e);
+                    },
+                    Mine => {
+                        println!("{:?} destroyed by a mine!", e.etype);
+                        // drop e
+                    },
+                    Monster => {
+                        println!("{:?} eaten by a monster!", e.etype);
+                    }
+                }
             }
             None => {
                 // No collision, move.
