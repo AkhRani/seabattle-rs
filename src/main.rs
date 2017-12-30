@@ -58,7 +58,9 @@ impl Entity {
     }
 }
 
-fn print_map(entities: &Vec<Entity>) {
+type EntityColl = std::collections::VecDeque<Entity>;
+
+fn print_map(entities: &EntityColl) {
     let mut tiles = [["   "; WIDTH]; HEIGHT];
     for e in entities {
         // TODO:  Sonar noise
@@ -83,7 +85,7 @@ fn print_map(entities: &Vec<Entity>) {
     println!("{}", ".".repeat(WIDTH*3+2));
 }
 
-fn get_collision(entities: &Vec<Entity>, x:usize, y:usize) -> Option<Entity> {
+fn get_collision(entities: &EntityColl, x:usize, y:usize) -> Option<Entity> {
     for e in entities {
         let pos = Position{x, y};
         if pos == e.pos {
@@ -93,7 +95,7 @@ fn get_collision(entities: &Vec<Entity>, x:usize, y:usize) -> Option<Entity> {
     None
 }
 
-fn check_collision(entities: &Vec<Entity>, x:usize, y:usize) -> bool {
+fn check_collision(entities: &EntityColl, x:usize, y:usize) -> bool {
     for e in entities {
         // Why doesn't this work? if Position{x, y} == e.pos {
         let pos = Position{x, y};
@@ -104,7 +106,7 @@ fn check_collision(entities: &Vec<Entity>, x:usize, y:usize) -> bool {
     return false;
 }
 
-fn place_random(entities: &Vec<Entity>, rng: &mut rand::ThreadRng, etype: EType) -> Entity {
+fn place_random(entities: &EntityColl, rng: &mut rand::ThreadRng, etype: EType) -> Entity {
     loop {
         let x = rng.gen_range(0, WIDTH);
         let y = rng.gen_range(0, HEIGHT);
@@ -114,8 +116,8 @@ fn place_random(entities: &Vec<Entity>, rng: &mut rand::ThreadRng, etype: EType)
     }
 }
 
-fn setup() -> Vec<Entity> {
-    let mut entities = Vec::new();
+fn setup() -> EntityColl {
+    let mut entities = EntityColl::new();
 
     // Island Bitmap
     let island = [
@@ -131,108 +133,105 @@ fn setup() -> Vec<Entity> {
     for y in 7..14 {
         for x in 7..13 {
             if island[i] == 1 {
-                entities.push(Entity::new(x, y, EType::Island));
+                entities.push_back(Entity::new(x, y, EType::Island));
             }
             i += 1;
         }
     }
 
     // Player
-    entities.push(Entity::new(10, 10, EType::Player));
+    entities.push_back(Entity::new(10, 10, EType::Player));
 
     // Enemy Ships
     let mut rng = rand::thread_rng();
     for _i in 0..rng.gen_range(15, 31) {
         let mut ship = place_random(&entities, &mut rng, EType::Ship);
         ship.components.push(Component::new_vel(&mut rng));
-        entities.push(ship);
+        entities.push_back(ship);
     }
 
     // HQ
     let hq = place_random(&entities, &mut rng, EType::HQ);
-    entities.push(hq);
+    entities.push_back(hq);
 
     // Mines
     for _i in 0..rng.gen_range(8, 15) {
         let mine = place_random(&entities, &mut rng, EType::Mine);
-        entities.push(mine);
+        entities.push_back(mine);
     }
 
     // Sea Monsters
     for _i in 0..4 {
         let mut monster = place_random(&entities, &mut rng, EType::Monster);
         monster.components.push(Component::new_vel(&mut rng));
-        entities.push(monster);
+        entities.push_back(monster);
     }
     entities
 }
 
-fn move_ships(entities: &mut Vec<Entity>) {
-    let mut moved = Vec::new();
-
-    entities.retain(|e|  {
-        if e.components.is_empty() {
-            moved.push(e.clone());
-            false
-        } else {
-            true
-        }
-    });
-
-    while entities.len() != 0 {
-        let starting_len = entities.len();
-        // For each (unmoved) entity
-        let mut i = 0;
-        while i != entities.len() {
-            // Calculate destination
-            // let &mut vel : Component::Velocity = entities[i].components[0];
-            let mover = &mut entities[i];
-            /*
-            let Component::Velocity(dx, dy) = entities[i].components[0];
-            let x = entities[i].pos.x.wrapping_add(dx as usize);
-            let y = entities[i].pos.y.wrapping_add(dy as usize);
-            */
-            let Component::Velocity(dx, dy) = mover.components[0];
-            let x = mover.pos.x.wrapping_add(dx as usize);
-            let y = mover.pos.y.wrapping_add(dy as usize);
-            if x >= WIDTH || y >= WIDTH {
-                // TODO:  Bounce
-                println!("thud");
-                moved.push(entities.remove(i));
-            } else if check_collision(entities, x, y) {
-                // If collision in unmoved, leave unmoved for now
-                i += 1;
-            } else {
-                // let opt = get_collision(&moved, x, y);
-                // match opt {
-                match get_collision(&moved, x, y) {
-                    Some(crashee) => {
-                        // If collision in moved, can't move.
-                        // TODO:  ship collision, monster fun, etc.
-                        if 
-                        println!("bang, hit {:?}", crashee.etype);
-                        moved.push(entities.remove(i));
-                    }
-                    None => {
-                        // No collision, move.
-                        entities[i].pos = Position {x, y};
-                        moved.push(entities.remove(i));
-                    }
-                }
+fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) {
+    // Calculate destination
+    let Component::Velocity(dx, dy) = e.components[0];
+    let x = e.pos.x.wrapping_add(dx as usize);
+    let y = e.pos.y.wrapping_add(dy as usize);
+    if x >= WIDTH || y >= WIDTH {
+        // TODO:  Bounce
+        println!("thud");
+        moved.push_back(e);
+    } else if check_collision(unmoved, x, y) {
+        // Might be able to move later
+        unmoved.push_back(e);
+    } else {
+        match get_collision(&moved, x, y) {
+            Some(crashee) => {
+                // If collision in moved, can't move.
+                // TODO:  ship collision, monster fun, etc.
+                println!("bang, hit {:?}", crashee.etype);
+                moved.push_back(e);
+            }
+            None => {
+                // No collision, move.
+                let mut moved_entity = e;
+                moved_entity.pos = Position {x, y};
+                moved.push_back(moved_entity);
             }
         }
-        if starting_len == entities.len() {
-            // Movement blocked, give up
-            println!("stalemate!");
-            break;
+    }
+}
+
+fn move_enemies(entities: &mut EntityColl) {
+    let mut moved = EntityColl::with_capacity(entities.len());
+    let mut unmoved = EntityColl::with_capacity(entities.len());
+
+    // Non-moving entities get precedence
+    // Might be able to ensure this based on initial order and
+    // the generic movement function.
+    while let Some(e) = entities.pop_front() {
+        if e.components.is_empty() {
+            moved.push_back(e);
+        } else {
+            unmoved.push_back(e);
+        }
+    }
+
+    while unmoved.len() != 0 {
+        let unmoved_len = unmoved.len();
+        for _i in 0..unmoved_len {
+            let e = unmoved.pop_front().unwrap();
+            move_enemy(e, &mut unmoved, &mut moved);
+        }
+        if unmoved_len == unmoved.len() {
+            // TODO:  Change direction of remaining unmoved entities
+            println!("Stalemate");
         }
     }
     entities.extend(moved.drain(..));
+    entities.extend(unmoved.drain(..));
 }
 
 fn main() {
     let mut entities = setup();
     print_map(&entities);
-    move_ships(&mut entities);
+    move_enemies(&mut entities);
     print_map(&entities);
 }
