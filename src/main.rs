@@ -21,6 +21,13 @@ enum EType {
     Monster
 }
 
+#[derive(Debug)]
+enum EResolution {
+    CrasheeDestroyed,
+    MoverDestroyed,
+    MoverChangeDirection
+}
+
 #[derive(Clone, Debug)]
 enum Component {
     Velocity(i8, i8),
@@ -95,11 +102,11 @@ fn print_map(entities: &EntityColl) {
     println!("{}", ".".repeat(WIDTH*3+2));
 }
 
-fn get_collision(entities: &EntityColl, x:usize, y:usize) -> Option<usize> {
-    for (i, e) in entities.iter().enumerate() {
-        let pos = Position{x, y};
-        if pos == e.pos && e.alive {
-            return Some(i);
+fn get_collision(entities: &mut EntityColl, x:usize, y:usize) -> Option<Entity> {
+    let pos = Position{x, y};
+    for i in 0..entities.len() {
+        if pos == entities[i].pos && entities[i].alive {
+            return entities.swap_remove_back(i);
         }
     }
     None
@@ -154,11 +161,16 @@ fn setup() -> EntityColl {
 
     // Enemy Ships
     let mut rng = rand::thread_rng();
+    /*
     for _i in 0..rng.gen_range(15, 31) {
         let mut ship = place_random(&entities, &mut rng, EType::Ship);
         ship.components.push(Component::new_vel());
         entities.push_back(ship);
     }
+    */
+    let mut ship = Entity::new(6, 9, EType::Ship);
+    ship.components.push(Component::Velocity(1, 0));
+    entities.push_back(ship);
 
     // HQ
     let hq = place_random(&entities, &mut rng, EType::HQ);
@@ -179,27 +191,45 @@ fn setup() -> EntityColl {
     entities
 }
 
-fn ship_collision(e: Entity, crashee: Entity, unmoved: &mut EntityColl) {
+fn resolve_collision(e: &Entity, crashee: &Entity) -> EResolution {
     use EType::*;
-    match crashee.etype {
-        Island | Ship | Player | HQ => {
-            println!("{:?} changed direction to avoid {:?}",
-                     e.etype, crashee.etype);
-            unmoved.push_back(change_direction(e));
-        },
-        Mine => {
-            println!("{:?} destroyed by a mine!", e.etype);
-            // drop e
-        },
-        Monster => {
-            println!("{:?} eaten by a monster!", e.etype);
-            // drop e
+    match e.etype {
+        Ship => match crashee.etype {
+            Island | Ship | Player | HQ => {
+                println!("{:?} changed direction to avoid {:?}",
+                         e.etype, crashee.etype);
+                return EResolution::MoverChangeDirection;
+            },
+            Mine => {
+                println!("{:?} destroyed by a mine!", e.etype);
+                return EResolution::MoverDestroyed;
+            },
+            Monster => {
+                println!("{:?} eaten by a monster!", e.etype);
+                return EResolution::MoverDestroyed;
+            }
         }
+        Monster => match crashee.etype {
+            Island | Player | HQ => {
+                println!("{:?} changed direction to avoid {:?}",
+                         e.etype, crashee.etype);
+                return EResolution::MoverChangeDirection;
+            },
+            Ship => {
+                println!("Ship eaten by a moving monster!");
+                return EResolution::CrasheeDestroyed;
+            },
+            Mine => {
+                println!("{:?} destroyed by a mine!", e.etype);
+                return EResolution::MoverDestroyed;
+            },
+            Monster => {
+                println!("{:?} eaten by a monster!", e.etype);
+                return EResolution::MoverDestroyed;
+            }
+        }
+        _ => panic!("Unexpected mover type {:?}", e.etype)
     }
-}
-
-fn monster_collision(e: Entity, crashee: Entity, unmoved: &mut EntityColl) {
-    ship_collision(e, crashee, unmoved)
 }
 
 fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) {
@@ -216,20 +246,29 @@ fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) {
         unmoved.push_back(e);
     } else {
         // If collision in moved, we have to resolve
-        match get_collision(&moved, x, y) {
+        match get_collision(moved, x, y) {
             Some(crashee) => {
-                use EType::*;
-                match e.etype {
-                    Ship => ship_collision(e, moved[crashee].clone(), unmoved),
-                    Monster => monster_collision(e, moved[crashee].clone(), unmoved),
-                    _ => panic!("Unexpected mover type {:?}", e.etype)
+                use EResolution::*;
+                match resolve_collision(&e, &crashee) {
+                    CrasheeDestroyed => {
+                        let mut moved_entity = e;
+                        moved_entity.pos = Position {x, y};
+                        moved.push_back(moved_entity);
+                    },
 
+                    MoverDestroyed => moved.push_back(crashee),
+
+                    MoverChangeDirection => {
+                        unmoved.push_back(change_direction(e));
+                        moved.push_back(crashee);
+                    }
                 }
-            }
+            },
             None => {
                 // No collision, move.
                 let mut moved_entity = e;
                 moved_entity.pos = Position {x, y};
+                println!("Moving entity: {:?}", moved_entity);
                 moved.push_back(moved_entity);
             }
         }
