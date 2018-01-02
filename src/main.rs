@@ -21,7 +21,7 @@ enum EType {
     Monster
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum Component {
     Velocity(i8, i8),
 }
@@ -31,8 +31,8 @@ impl Component {
         let mut dx = 0;
         let mut dy = 0;
         while dx == 0 && dy == 0 {
-            dx = rand::thread_rng().gen_range(-1, 1);
-            dy = rand::thread_rng().gen_range(-1, 1);
+            dx = rand::thread_rng().gen_range(-1, 2);
+            dy = rand::thread_rng().gen_range(-1, 2);
         }
         Component::Velocity(dx, dy)
     }
@@ -62,7 +62,7 @@ type EntityColl = std::collections::VecDeque<Entity>;
 
 fn print_map(entities: &EntityColl) {
     let mut tiles = [["   "; WIDTH]; HEIGHT];
-    for e in entities {
+    for e in entities.iter() {
         // TODO:  Sonar noise
         tiles[e.pos.x][e.pos.y] = match e.etype {
             EType::Player => "(X)",
@@ -88,7 +88,7 @@ fn print_map(entities: &EntityColl) {
 fn get_collision(entities: &EntityColl, x:usize, y:usize) -> Option<Entity> {
     for e in entities {
         let pos = Position{x, y};
-        if pos == e.pos {
+        if pos == e.pos && e.alive {
             return Some(e.clone());
         }
     }
@@ -169,6 +169,32 @@ fn setup() -> EntityColl {
     entities
 }
 
+fn ship_collision(e: Entity, crashee: Entity, unmoved: &mut EntityColl) {
+    use EType::*;
+    match crashee.etype {
+        Island | Ship | Player | HQ => {
+            println!("{:?} changed direction to avoid {:?}",
+                     e.etype, crashee.etype);
+            let mut e = e;
+            e.components[0] = Component::new_vel();
+            println!("New velocity: {:?}", e.components[0]);
+            unmoved.push_back(e);
+        },
+        Mine => {
+            println!("{:?} destroyed by a mine!", e.etype);
+            // drop e
+        },
+        Monster => {
+            println!("{:?} eaten by a monster!", e.etype);
+            // drop e
+        }
+    }
+}
+
+fn monster_collision(e: Entity, crashee: Entity, unmoved: &mut EntityColl) {
+    ship_collision(e, crashee, unmoved)
+}
+
 fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) {
     // Calculate destination
     let Component::Velocity(dx, dy) = e.components[0];
@@ -182,25 +208,15 @@ fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) {
         // Might be able to move later
         unmoved.push_back(e);
     } else {
+        // If collision in moved, we have to resolve
         match get_collision(&moved, x, y) {
             Some(crashee) => {
-                // If collision in moved, we have a conflict
                 use EType::*;
-                match crashee.etype {
-                    Island | Ship | Player | HQ => {
-                        println!("{:?} changed direction to avoid {:?}",
-                                 e.etype, crashee.etype);
-                        let mut e = e;
-                        e.components[0] = Component::new_vel();
-                        unmoved.push_back(e);
-                    },
-                    Mine => {
-                        println!("{:?} destroyed by a mine!", e.etype);
-                        // drop e
-                    },
-                    Monster => {
-                        println!("{:?} eaten by a monster!", e.etype);
-                    }
+                match e.etype {
+                    Ship => ship_collision(e, crashee, unmoved),
+                    Monster => monster_collision(e, crashee, unmoved),
+                    _ => panic!("Unexpected mover type {:?}", e.etype)
+
                 }
             }
             None => {
@@ -235,8 +251,8 @@ fn move_enemies(entities: &mut EntityColl) {
             move_enemy(e, &mut unmoved, &mut moved);
         }
         if unmoved_len == unmoved.len() {
-            // TODO:  Change direction of remaining unmoved entities
             println!("Stalemate");
+            // TODO: Change direction of remaining unmoved entities
         }
     }
     entities.extend(moved.drain(..));
