@@ -5,7 +5,7 @@ use rand::Rng;
 const WIDTH: usize = 20;
 const HEIGHT: usize = 20;
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 struct Position {
     x: usize,
     y: usize,
@@ -38,7 +38,7 @@ impl Component {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Entity {
     pos: Position,
     etype: EType,
@@ -60,9 +60,19 @@ impl Entity {
 
 type EntityColl = std::collections::VecDeque<Entity>;
 
+fn change_direction(mut e: Entity) -> Entity {
+    // TODO:  If we have different types of components, replace the right one
+    e.components[0] = Component::new_vel();
+    println!("New velocity: {:?}", e.components[0]);
+    e
+}
+
 fn print_map(entities: &EntityColl) {
     let mut tiles = [["   "; WIDTH]; HEIGHT];
     for e in entities.iter() {
+        if !e.alive {
+            panic!("Unexpected dead entity in print_map: {:?}", e);
+        }
         // TODO:  Sonar noise
         tiles[e.pos.x][e.pos.y] = match e.etype {
             EType::Player => "(X)",
@@ -175,10 +185,7 @@ fn ship_collision(e: Entity, crashee: Entity, unmoved: &mut EntityColl) {
         Island | Ship | Player | HQ => {
             println!("{:?} changed direction to avoid {:?}",
                      e.etype, crashee.etype);
-            let mut e = e;
-            e.components[0] = Component::new_vel();
-            println!("New velocity: {:?}", e.components[0]);
-            unmoved.push_back(e);
+            unmoved.push_back(change_direction(e));
         },
         Mine => {
             println!("{:?} destroyed by a mine!", e.etype);
@@ -203,7 +210,7 @@ fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) {
     if x >= WIDTH || y >= WIDTH {
         // TODO:  Bounce
         println!("thud");
-        moved.push_back(e);
+        moved.push_back(change_direction(e));
     } else if check_collision(unmoved, x, y) {
         // Might be able to move later
         unmoved.push_back(e);
@@ -248,15 +255,27 @@ fn move_enemies(entities: &mut EntityColl) {
         let unmoved_len = unmoved.len();
         for _i in 0..unmoved_len {
             let e = unmoved.pop_front().unwrap();
-            move_enemy(e, &mut unmoved, &mut moved);
+            if e.alive {
+                move_enemy(e, &mut unmoved, &mut moved);
+            }
         }
         if unmoved_len == unmoved.len() {
+            // Either un-moved entities are trying to move through
+            // each other, or an un-moved entity is blocked by moved
+            // entities.
             println!("Stalemate");
-            // TODO: Change direction of remaining unmoved entities
+            // Change direction of remaining unmoved entities
+            for e in &mut unmoved {
+                e.components[0] = Component::new_vel();
+                println!("New velocity: {:?}", e.components[0]);
+            }
+            // Better luck next time
+            break;
         }
     }
-    entities.extend(moved.drain(..));
-    entities.extend(unmoved.drain(..));
+    // TODO:  Filter out dead entities
+    entities.extend(moved.into_iter());
+    entities.extend(unmoved.into_iter());
 }
 
 fn main() {
