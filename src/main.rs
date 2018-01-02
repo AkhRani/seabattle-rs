@@ -95,11 +95,11 @@ fn print_map(entities: &EntityColl) {
     println!("{}", ".".repeat(WIDTH*3+2));
 }
 
-fn get_collision(entities: &EntityColl, x:usize, y:usize) -> Option<Entity> {
-    for e in entities {
+fn get_collision(entities: &EntityColl, x:usize, y:usize) -> Option<usize> {
+    for (i, e) in entities.iter().enumerate() {
         let pos = Position{x, y};
         if pos == e.pos && e.alive {
-            return Some(e.clone());
+            return Some(i);
         }
     }
     None
@@ -220,8 +220,8 @@ fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) {
             Some(crashee) => {
                 use EType::*;
                 match e.etype {
-                    Ship => ship_collision(e, crashee, unmoved),
-                    Monster => monster_collision(e, crashee, unmoved),
+                    Ship => ship_collision(e, moved[crashee].clone(), unmoved),
+                    Monster => monster_collision(e, moved[crashee].clone(), unmoved),
                     _ => panic!("Unexpected mover type {:?}", e.etype)
 
                 }
