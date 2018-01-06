@@ -5,3 +5,5 @@ authors = ["Kevin Hart <kevin.kevinhart@gmail.com>"]
 
 [dependencies]
 rand = "*"
+enum-map = "*"
+enum-map-derive = "*"

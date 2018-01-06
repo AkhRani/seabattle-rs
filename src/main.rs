@@ -1,9 +1,38 @@
 extern crate rand;
-
 use rand::Rng;
+
+extern crate enum_map;
+use enum_map::EnumMap;
+
+#[macro_use] extern crate enum_map_derive;
 
 const WIDTH: usize = 20;
 const HEIGHT: usize = 20;
+
+#[derive(Debug, EnumMap)]
+enum SubSystem {
+    Engines,
+    Sonar,
+    Torpedos,
+    Missiles,
+    Manuevering,
+    Computers,
+    Resupply,
+    Sabotage,
+    Converter,
+}
+
+struct PlayerInfo {
+    damage: EnumMap<SubSystem, f32>,
+}
+
+impl PlayerInfo {
+    fn new() -> PlayerInfo {
+        PlayerInfo {
+            damage: EnumMap::<SubSystem, f32>::new(),
+        }
+    }
+}
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 struct Position {
@@ -65,7 +94,17 @@ impl Entity {
     }
 }
 
+// Note:  If you alias like this, you can't define your own methods.
 type EntityColl = std::collections::VecDeque<Entity>;
+
+// Note:  If you newtype like this, you can't use existing methods by default.
+// struct EntityColl(std::collections::VecDeque<Entity>);
+
+fn count_all_of(entities: &EntityColl, etype: EType) -> u32 {
+    entities.iter().
+         map(|e: &Entity| if e.alive && e.etype == etype {1} else {0}).
+         fold(0, |acc, ship| acc+ship)
+}
 
 fn change_direction(mut e: Entity) -> Entity {
     // TODO:  If we have different types of components, replace the right one
@@ -161,16 +200,16 @@ fn setup() -> EntityColl {
 
     // Enemy Ships
     let mut rng = rand::thread_rng();
-    /*
     for _i in 0..rng.gen_range(15, 31) {
         let mut ship = place_random(&entities, &mut rng, EType::Ship);
         ship.components.push(Component::new_vel());
         entities.push_back(ship);
     }
-    */
+    /*
     let mut ship = Entity::new(6, 9, EType::Ship);
     ship.components.push(Component::Velocity(1, 0));
     entities.push_back(ship);
+    */
 
     // HQ
     let hq = place_random(&entities, &mut rng, EType::HQ);
@@ -317,9 +356,21 @@ fn move_enemies(entities: &mut EntityColl) {
     entities.extend(unmoved.into_iter());
 }
 
+fn status_report(entities: &EntityColl, info: &PlayerInfo) {
+    println!("");
+    println!("# of enemy ships left...{}", count_all_of(entities, EType::Ship));
+    println!("    SYSTEM       HEALTH  (negative is bad)");
+    println!("    ------       ------");
+    for (key, value) in info.damage {
+        println!("    {:12} {:2.4}", format!("{:?}", key), value);
+    }
+}
+
 fn main() {
     let mut entities = setup();
+    let mut player_info = PlayerInfo::new();
     print_map(&entities);
     move_enemies(&mut entities);
+    status_report(&entities, &player_info);
     print_map(&entities);
 }
