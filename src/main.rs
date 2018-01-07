@@ -4,6 +4,8 @@ use rand::Rng;
 extern crate enum_map;
 use enum_map::EnumMap;
 
+use std::io::{self, stdin, stdout, Write};
+
 #[macro_use] extern crate enum_map_derive;
 
 const WIDTH: usize = 20;
@@ -23,13 +25,35 @@ enum SubSystem {
 }
 
 struct PlayerInfo {
+    name: String,
     damage: EnumMap<SubSystem, f32>,
+    crew: u32,
+    power: u32,
+    fuel: u32,
+    torpedos: u32,
+    missiles: u32,
+}
+
+fn prompt(pstr: &'static str) -> String {
+    print!("{}? ", pstr);
+    stdout().flush().unwrap();
+    let mut result = String::new();
+    stdin().read_line(&mut result).expect("Failed to read line");
+    let len = result.trim_right().len();
+    result.truncate(len);
+    result
 }
 
 impl PlayerInfo {
     fn new() -> PlayerInfo {
         PlayerInfo {
+            name: prompt("What is your name, captain"),
             damage: EnumMap::<SubSystem, f32>::new(),
+            crew: 30,
+            power: 6000,
+            fuel: 2500,
+            torpedos: 10,
+            missiles: 3,
         }
     }
 }
@@ -307,7 +331,7 @@ fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) {
                 // No collision, move.
                 let mut moved_entity = e;
                 moved_entity.pos = Position {x, y};
-                println!("Moving entity: {:?}", moved_entity);
+                // println!("Moving entity: {:?}", moved_entity);
                 moved.push_back(moved_entity);
             }
         }
@@ -369,6 +393,9 @@ fn status_report(entities: &EntityColl, info: &PlayerInfo) {
 fn main() {
     let mut entities = setup();
     let mut player_info = PlayerInfo::new();
+
+    println!("You must destroy {} enemy ships to win, {}.",
+             count_all_of(&entities, EType::Ship), player_info.name);
     print_map(&entities);
     move_enemies(&mut entities);
     status_report(&entities, &player_info);
