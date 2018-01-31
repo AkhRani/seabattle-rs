@@ -4,12 +4,20 @@ use rand::Rng;
 extern crate enum_map;
 use enum_map::EnumMap;
 
-use std::io::{self, stdin, stdout, Write};
+use std::io::{stdin, stdout, Write};
 
 #[macro_use] extern crate enum_map_derive;
 
 const WIDTH: usize = 20;
 const HEIGHT: usize = 20;
+
+#[derive(Debug)]
+enum Command {
+    Sonar,
+    Status,
+    Torpedo,
+    Surrender,
+}
 
 #[derive(Debug, EnumMap)]
 enum SubSystem {
@@ -26,6 +34,7 @@ enum SubSystem {
 
 struct PlayerInfo {
     name: String,
+    alive: bool,
     damage: EnumMap<SubSystem, f32>,
     crew: u32,
     power: u32,
@@ -34,7 +43,7 @@ struct PlayerInfo {
     missiles: u32,
 }
 
-fn prompt(pstr: &'static str) -> String {
+fn prompt(pstr: &str) -> String {
     print!("{}? ", pstr);
     stdout().flush().unwrap();
     let mut result = String::new();
@@ -48,6 +57,7 @@ impl PlayerInfo {
     fn new() -> PlayerInfo {
         PlayerInfo {
             name: prompt("What is your name, captain"),
+            alive: true,
             damage: EnumMap::<SubSystem, f32>::new(),
             crew: 30,
             power: 6000,
@@ -74,6 +84,7 @@ enum EType {
     Monster
 }
 
+// Collision outcomes / resolutions
 #[derive(Debug)]
 enum EResolution {
     CrasheeDestroyed,
@@ -102,7 +113,6 @@ impl Component {
 struct Entity {
     pos: Position,
     etype: EType,
-    alive: bool,
     components: Vec<Component>
 }
 
@@ -112,7 +122,6 @@ impl Entity {
         Entity {
             pos: Position {x, y},
             etype,
-            alive: true,
             components: Vec::new(),
         }
     }
@@ -126,23 +135,20 @@ type EntityColl = std::collections::VecDeque<Entity>;
 
 fn count_all_of(entities: &EntityColl, etype: EType) -> u32 {
     entities.iter().
-         map(|e: &Entity| if e.alive && e.etype == etype {1} else {0}).
+         map(|e: &Entity| if e.etype == etype {1} else {0}).
          fold(0, |acc, ship| acc+ship)
 }
 
 fn change_direction(mut e: Entity) -> Entity {
     // TODO:  If we have different types of components, replace the right one
     e.components[0] = Component::new_vel();
-    println!("New velocity: {:?}", e.components[0]);
+    // println!("New velocity: {:?}", e.components[0]);
     e
 }
 
 fn print_map(entities: &EntityColl) {
     let mut tiles = [["   "; WIDTH]; HEIGHT];
     for e in entities.iter() {
-        if !e.alive {
-            panic!("Unexpected dead entity in print_map: {:?}", e);
-        }
         // TODO:  Sonar noise
         tiles[e.pos.x][e.pos.y] = match e.etype {
             EType::Player => "(X)",
@@ -168,7 +174,7 @@ fn print_map(entities: &EntityColl) {
 fn get_collision(entities: &mut EntityColl, x:usize, y:usize) -> Option<Entity> {
     let pos = Position{x, y};
     for i in 0..entities.len() {
-        if pos == entities[i].pos && entities[i].alive {
+        if pos == entities[i].pos {
             return entities.swap_remove_back(i);
         }
     }
@@ -302,7 +308,7 @@ fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) {
     let y = e.pos.y.wrapping_add(dy as usize);
     if x >= WIDTH || y >= WIDTH {
         // TODO:  Bounce
-        println!("thud");
+        println!("{:?} changed direction to stay in the area.", e.etype);
         moved.push_back(change_direction(e));
     } else if check_collision(unmoved, x, y) {
         // Might be able to move later
@@ -357,9 +363,7 @@ fn move_enemies(entities: &mut EntityColl) {
         let unmoved_len = unmoved.len();
         for _i in 0..unmoved_len {
             let e = unmoved.pop_front().unwrap();
-            if e.alive {
-                move_enemy(e, &mut unmoved, &mut moved);
-            }
+            move_enemy(e, &mut unmoved, &mut moved);
         }
         if unmoved_len == unmoved.len() {
             // Either un-moved entities are trying to move through
@@ -369,7 +373,7 @@ fn move_enemies(entities: &mut EntityColl) {
             // Change direction of remaining unmoved entities
             for e in &mut unmoved {
                 e.components[0] = Component::new_vel();
-                println!("New velocity: {:?}", e.components[0]);
+                // println!("New velocity: {:?}", e.components[0]);
             }
             // Better luck next time
             break;
@@ -390,14 +394,108 @@ fn status_report(entities: &EntityColl, info: &PlayerInfo) {
     }
 }
 
+fn get_command(player_info: &PlayerInfo) -> Command {
+    let prompt_str = &format!("What are your orders, {}", player_info.name);
+    loop {
+        use Command::*;
+        let input = prompt(prompt_str);
+        match input.parse::<i32>() {
+            Ok(v) => match v {
+                1 => return Sonar,
+                2 => return Torpedo,
+                5 => return Status,
+                9 => return Surrender,
+                _ => {}
+            }
+            Err(e) => {}
+        }
+        println!("The Commands are:");
+        println!("      0: Navigation");
+        println!("      1: Sonar");
+        println!("      2: Torpedo");
+        println!("      5: Status");
+        println!("      9: Surrender");
+    }
+}
+
+fn get_raw_direction() -> (i8, i8) {
+    // Prompt the player for a direction for navigation, sonar, or weapons.
+    loop {
+        let input = prompt("What direction");
+        match input.parse::<i32>() {
+            Ok(v) => match v {
+                1 => return (-1, -1),
+                2 => return (0, -1),
+                3 => return (1, -1),
+                4 => return (-1, 0),
+                6 => return (1, 0),
+                7 => return (-1, 1),
+                8 => return (0, 1),
+                9 => return (1, 1),
+                _ => ()
+            }
+            _ => ()
+        }
+        println!("The Directions are:");
+        println!(" 7 8 9");
+        println!("  \\|/");
+        println!(" 4-*-6");
+        println!("  /|\\");
+        println!(" 1 2 3");
+    }
+}
+
+fn fire_torpedo(entities: &mut EntityColl, player_info: &mut PlayerInfo) {
+    let (dx, dy) = get_raw_direction();
+    println!("It's a dud!");
+}
+
+fn surrender(player_info: &mut PlayerInfo) {
+    println!("Coward!  You're not very patriotic, {}.", player_info.name);
+    player_info.alive = false;
+}
+
 fn main() {
     let mut entities = setup();
     let mut player_info = PlayerInfo::new();
 
-    println!("You must destroy {} enemy ships to win, {}.",
-             count_all_of(&entities, EType::Ship), player_info.name);
-    print_map(&entities);
-    move_enemies(&mut entities);
-    status_report(&entities, &player_info);
-    print_map(&entities);
+    loop {
+        let ships = count_all_of(&entities, EType::Ship);
+        println!("You must destroy {} enemy ships to win, {}.",
+                 ships, player_info.name);
+        loop {
+            use Command::*;
+            match get_command(&player_info) {
+                Sonar => print_map(&entities),
+                Status => status_report(&entities, &player_info),
+                Torpedo => {
+                    fire_torpedo(&mut entities, &mut player_info);
+                    break;
+                },
+                Surrender => {
+                    surrender(&mut player_info);
+                    break;
+                },
+            }
+        }
+        // Player may have destroyed itself, surrendered, or won.
+        if !player_info.alive {
+            break;
+        }
+        if ships == 0 {
+            println!("You Won!  All hail {} the glorious!!", player_info.name);
+            break;
+        }
+        move_enemies(&mut entities);
+    }
+    let ships = count_all_of(&entities, EType::Ship);
+    if ships > 0 {
+        println!("There are still {} enemy ships left, {}.",
+                 ships, player_info.name);
+        println!("You will be demoted to the rank of Deck Scrubber!!");
+        // TODO:  Create outer loop, ask player for another game.
+    } else {
+        println!("Good work {}, you got them all!!", player_info.name);
+        println!("Promotion and commendations will be given immediately!");
+    }
 }
