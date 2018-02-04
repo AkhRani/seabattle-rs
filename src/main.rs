@@ -1,10 +1,11 @@
 extern crate rand;
-use rand::Rng;
+use rand::{Rng, thread_rng};
 
 extern crate enum_map;
 use enum_map::EnumMap;
 
 use std::io::{stdin, stdout, Write};
+use std::{thread, time};
 
 #[macro_use] extern crate enum_map_derive;
 
@@ -36,6 +37,7 @@ struct PlayerInfo {
     name: String,
     alive: bool,
     damage: EnumMap<SubSystem, f32>,
+    depth: u32,
     crew: u32,
     power: u32,
     fuel: u32,
@@ -59,6 +61,7 @@ impl PlayerInfo {
             name: prompt("What is your name, captain"),
             alive: true,
             damage: EnumMap::<SubSystem, f32>::new(),
+            depth: 100,
             crew: 30,
             power: 6000,
             fuel: 2500,
@@ -169,6 +172,15 @@ fn print_map(entities: &EntityColl) {
         println!(".");
     }
     println!("{}", ".".repeat(WIDTH*3+2));
+}
+
+fn get_player_pos(entities: &EntityColl) -> Option<Position> {
+    for e in entities.iter() {
+        if EType::Player == e.etype {
+            return Some(e.pos.clone());
+        }
+    }
+    None
 }
 
 fn get_collision(entities: &mut EntityColl, x:usize, y:usize) -> Option<Entity> {
@@ -424,14 +436,14 @@ fn get_raw_direction() -> (i8, i8) {
         let input = prompt("What direction");
         match input.parse::<i32>() {
             Ok(v) => match v {
-                1 => return (-1, -1),
-                2 => return (0, -1),
-                3 => return (1, -1),
+                1 => return (-1, 1),
+                2 => return (0, 1),
+                3 => return (1, 1),
                 4 => return (-1, 0),
                 6 => return (1, 0),
-                7 => return (-1, 1),
-                8 => return (0, 1),
-                9 => return (1, 1),
+                7 => return (-1, -1),
+                8 => return (0, -1),
+                9 => return (1, -1),
                 _ => ()
             }
             _ => ()
@@ -445,9 +457,69 @@ fn get_raw_direction() -> (i8, i8) {
     }
 }
 
-fn fire_torpedo(entities: &mut EntityColl, player_info: &mut PlayerInfo) {
-    let (dx, dy) = get_raw_direction();
-    println!("It's a dud!");
+fn fire_torpedo(entities: &mut EntityColl, pi: &mut PlayerInfo) {
+    if pi.damage[SubSystem::Torpedos] > 0. {
+        println!("Torpedo tubes are under repair, {}.", pi.name);
+    } else if pi.crew < 10 {
+        println!("Not enough crew to fire torpedos, {}.", pi.name);
+    } else if pi.torpedos == 0 {
+        println!("No torpedos left, {}.", pi.name);
+    } else if pi.depth >= 2000 && thread_rng().next_f32() > 0.5 {
+        println!("Pressure implodes sub upon firing... You're crushed!!");
+        pi.alive = false;
+    } else {
+        let (dx, dy) = get_raw_direction();
+        let range = 7 - (thread_rng().next_f32()*4.).round() as i32;
+        if pi.depth > 50 {
+            let range = if range > 5 { range - 5 } else { 0 };
+        }
+        // Note:  get_player extracts player from collection.
+        let Position{mut x, mut y} = get_player_pos(entities).unwrap();
+        println!("range: {}", range);
+        for r in 0..range {
+            x = x.wrapping_add(dx as usize);
+            y = y.wrapping_add(dy as usize);
+
+            // Add some suspense
+            print!("..!..");
+            stdout().flush().unwrap();
+            thread::sleep(time::Duration::from_millis(500));
+
+            match get_collision(entities, x, y) {
+                Some(e) => {
+                    resolve_torpedo(e, entities, pi);
+                    break;
+                }
+                None => {}
+            }
+        }
+    }
+}
+
+fn resolve_torpedo(e: Entity, entities: &mut EntityColl, pi: &mut PlayerInfo) {
+    use EType::*;
+    match e.etype {
+        Player => {
+            panic!("How did you torpedo yourself?!?");
+        }
+        Island => {
+            println!("You took out some island, {}", pi.name);
+        }
+        Ship => {
+            println!("Ouch!  You got one, {}", pi.name);
+        }
+        Mine => {
+            println!("BLAM!!  Shot wasted on a mine.");
+            entities.push_back(e);
+        }
+        HQ => {
+            println!("You blew up your headquarters, {}!", pi.name);
+        }
+        Monster => {
+            println!("A sea monster had a torpedo for lunch!");
+            entities.push_back(e);
+        }
+    }
 }
 
 fn surrender(player_info: &mut PlayerInfo) {
