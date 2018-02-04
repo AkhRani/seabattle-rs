@@ -58,7 +58,7 @@ fn prompt(pstr: &str) -> String {
 impl PlayerInfo {
     fn new() -> PlayerInfo {
         PlayerInfo {
-            name: prompt("What is your name, captain"),
+            name: prompt("What is your name"),
             alive: true,
             damage: EnumMap::<SubSystem, f32>::new(),
             depth: 100,
@@ -319,7 +319,6 @@ fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) {
     let x = e.pos.x.wrapping_add(dx as usize);
     let y = e.pos.y.wrapping_add(dy as usize);
     if x >= WIDTH || y >= WIDTH {
-        // TODO:  Bounce
         println!("{:?} changed direction to stay in the area.", e.etype);
         moved.push_back(change_direction(e));
     } else if check_collision(unmoved, x, y) {
@@ -396,13 +395,25 @@ fn move_enemies(entities: &mut EntityColl) {
     entities.extend(unmoved.into_iter());
 }
 
-fn status_report(entities: &EntityColl, info: &PlayerInfo) {
-    println!("");
-    println!("# of enemy ships left...{}", count_all_of(entities, EType::Ship));
-    println!("    SYSTEM       HEALTH  (negative is bad)");
-    println!("    ------       ------");
-    for (key, value) in info.damage {
-        println!("    {:12} {:2.4}", format!("{:?}", key), value);
+fn status_report(entities: &EntityColl, pi: &PlayerInfo) {
+    if pi.damage[SubSystem::Computers] > 0. {
+        println!("No reports are able to get through, {}.", pi.name);
+    } else if pi.crew <= 3 {
+        println!("No one left to give the report, {}.", pi.name);
+    } else {
+        println!("");
+        println!("# of enemy ships left...{}", count_all_of(entities, EType::Ship));
+        println!("# of power units left...{}", pi.power);
+        println!("# of torpedos  left.....{}", pi.torpedos);
+        println!("# of missiles left......{}", pi.missiles);
+        println!("# of crewmen left.......{}", pi.crew);
+        println!("LBS. of fuel left.......{}", pi.fuel);
+        println!();
+        println!("    SYSTEM       HEALTH  (negative is bad)");
+        println!("    ------       ------");
+        for (key, value) in pi.damage {
+            println!("    {:12} {:2.4}", format!("{:?}", key), value);
+        }
     }
 }
 
@@ -468,30 +479,39 @@ fn fire_torpedo(entities: &mut EntityColl, pi: &mut PlayerInfo) {
         println!("Pressure implodes sub upon firing... You're crushed!!");
         pi.alive = false;
     } else {
+        pi.torpedos -= 1;
+        pi.power -= 150;
+
         let (dx, dy) = get_raw_direction();
-        let range = 7 - (thread_rng().next_f32()*4.).round() as i32;
+        // Note:  Docs say range is 7-13, but equation below does not match.
+        let mut range = 7 - (thread_rng().next_f32()*5.).round() as i32;
         if pi.depth > 50 {
-            let range = if range > 5 { range - 5 } else { 0 };
+            range = range + 5;
         }
-        // Note:  get_player extracts player from collection.
+
+        let mut success = false;
         let Position{mut x, mut y} = get_player_pos(entities).unwrap();
-        println!("range: {}", range);
-        for r in 0..range {
+        for _ in 0..range {
             x = x.wrapping_add(dx as usize);
             y = y.wrapping_add(dy as usize);
+            if x >= WIDTH || y >= WIDTH {
+                println!("Torpedo out of range... Ineffectual {}", pi.name);
+                break;
+            }
 
             // Add some suspense
             print!("..!..");
             stdout().flush().unwrap();
             thread::sleep(time::Duration::from_millis(500));
 
-            match get_collision(entities, x, y) {
-                Some(e) => {
-                    resolve_torpedo(e, entities, pi);
-                    break;
-                }
-                None => {}
+            if let Some(e) = get_collision(entities, x, y) {
+                resolve_torpedo(e, entities, pi);
+                success = true;
+                break;
             }
+        }
+        if !success {
+            println!("Dud.");
         }
     }
 }
@@ -503,10 +523,10 @@ fn resolve_torpedo(e: Entity, entities: &mut EntityColl, pi: &mut PlayerInfo) {
             panic!("How did you torpedo yourself?!?");
         }
         Island => {
-            println!("You took out some island, {}", pi.name);
+            println!("You took out some island, {}.", pi.name);
         }
         Ship => {
-            println!("Ouch!  You got one, {}", pi.name);
+            println!("Ouch!  You got one, {}!", pi.name);
         }
         Mine => {
             println!("BLAM!!  Shot wasted on a mine.");
