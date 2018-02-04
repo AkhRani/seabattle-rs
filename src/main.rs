@@ -149,31 +149,6 @@ fn change_direction(mut e: Entity) -> Entity {
     e
 }
 
-fn print_map(entities: &EntityColl) {
-    let mut tiles = [["   "; WIDTH]; HEIGHT];
-    for e in entities.iter() {
-        // TODO:  Sonar noise
-        tiles[e.pos.x][e.pos.y] = match e.etype {
-            EType::Player => "(X)",
-            EType::Island => "***",
-            EType::Ship => "\\#/",
-            EType::Mine => " $ ",
-            EType::HQ => "-H-",
-            EType::Monster => "SSS",
-        }
-    }
-
-    println!("{}", ".".repeat(WIDTH*3+2));
-    for y in 0..HEIGHT {
-        print!(".");
-        for x in 0..WIDTH {
-            print!("{}", tiles[x][y]);
-        }
-        println!(".");
-    }
-    println!("{}", ".".repeat(WIDTH*3+2));
-}
-
 fn get_player_pos(entities: &EntityColl) -> Option<Position> {
     for e in entities.iter() {
         if EType::Player == e.etype {
@@ -270,6 +245,195 @@ fn setup() -> EntityColl {
         entities.push_back(monster);
     }
     entities
+}
+
+fn get_command(player_info: &PlayerInfo) -> Command {
+    let prompt_str = &format!("What are your orders, {}", player_info.name);
+    loop {
+        use Command::*;
+        let input = prompt(prompt_str);
+        match input.parse::<i32>() {
+            Ok(v) => match v {
+                1 => return Sonar,
+                2 => return Torpedo,
+                5 => return Status,
+                9 => return Surrender,
+                _ => {}
+            }
+            Err(e) => {}
+        }
+        println!("The Commands are:");
+        println!("      0: Navigation");
+        println!("      1: Sonar");
+        println!("      2: Torpedo");
+        println!("      5: Status");
+        println!("      9: Surrender");
+    }
+}
+
+fn get_direction() -> (i8, i8) {
+    // Prompt the player for a direction for navigation, sonar, or weapons.
+    loop {
+        let input = prompt("What direction");
+        match input.parse::<i32>() {
+            Ok(v) => match v {
+                1 => return (-1, 1),
+                2 => return (0, 1),
+                3 => return (1, 1),
+                4 => return (-1, 0),
+                6 => return (1, 0),
+                7 => return (-1, -1),
+                8 => return (0, -1),
+                9 => return (1, -1),
+                _ => ()
+            }
+            _ => ()
+        }
+        println!("The Directions are:");
+        println!(" 7 8 9");
+        println!("  \\|/");
+        println!(" 4-*-6");
+        println!("  /|\\");
+        println!(" 1 2 3");
+    }
+}
+
+/**********************************************************************************
+ * Command #1, sonar
+ *********************************************************************************/
+fn sonar(entities: &EntityColl) {
+    let mut tiles = [["   "; WIDTH]; HEIGHT];
+    for e in entities.iter() {
+        // TODO:  Sonar noise
+        tiles[e.pos.x][e.pos.y] = match e.etype {
+            EType::Player => "(X)",
+            EType::Island => "***",
+            EType::Ship => "\\#/",
+            EType::Mine => " $ ",
+            EType::HQ => "-H-",
+            EType::Monster => "SSS",
+        }
+    }
+
+    println!("{}", ".".repeat(WIDTH*3+2));
+    for y in 0..HEIGHT {
+        print!(".");
+        for x in 0..WIDTH {
+            print!("{}", tiles[x][y]);
+        }
+        println!(".");
+    }
+    println!("{}", ".".repeat(WIDTH*3+2));
+}
+
+/**********************************************************************************
+ * Command #2, torpedo control
+ *********************************************************************************/
+fn fire_torpedo(entities: &mut EntityColl, pi: &mut PlayerInfo) {
+    if pi.damage[SubSystem::Torpedos] < 0. {
+        println!("Torpedo tubes are under repair, {}.", pi.name);
+    } else if pi.crew < 10 {
+        println!("Not enough crew to fire torpedos, {}.", pi.name);
+    } else if pi.torpedos == 0 {
+        println!("No torpedos left, {}.", pi.name);
+    } else if pi.depth >= 2000 && thread_rng().next_f32() > 0.5 {
+        println!("Pressure implodes sub upon firing... You're crushed!!");
+        pi.alive = false;
+    } else {
+        pi.torpedos -= 1;
+        pi.power -= 150;
+
+        let (dx, dy) = get_direction();
+        // Note:  Docs say range is 7-13, but equation below does not match.
+        let mut range = 7 - (thread_rng().next_f32()*5.).round() as i32;
+        if pi.depth > 50 {
+            range = range + 5;
+        }
+
+        let mut success = false;
+        let Position{mut x, mut y} = get_player_pos(entities).unwrap();
+        for _ in 0..range {
+            x = x.wrapping_add(dx as usize);
+            y = y.wrapping_add(dy as usize);
+            if x >= WIDTH || y >= WIDTH {
+                println!("Torpedo out of range... Ineffectual {}", pi.name);
+                break;
+            }
+
+            // Add some suspense
+            print!("..!..");
+            stdout().flush().unwrap();
+            thread::sleep(time::Duration::from_millis(500));
+
+            if let Some(e) = get_collision(entities, x, y) {
+                resolve_torpedo(e, entities, pi);
+                success = true;
+                break;
+            }
+        }
+        if !success {
+            println!("Dud.");
+        }
+    }
+}
+
+fn resolve_torpedo(e: Entity, entities: &mut EntityColl, pi: &mut PlayerInfo) {
+    use EType::*;
+    match e.etype {
+        Player => {
+            panic!("How did you torpedo yourself?!?");
+        }
+        Island => {
+            println!("You took out some island, {}.", pi.name);
+        }
+        Ship => {
+            println!("Ouch!  You got one, {}!", pi.name);
+        }
+        Mine => {
+            println!("BLAM!!  Shot wasted on a mine.");
+            entities.push_back(e);
+        }
+        HQ => {
+            println!("You blew up your headquarters, {}!", pi.name);
+        }
+        Monster => {
+            println!("A sea monster had a torpedo for lunch!");
+            entities.push_back(e);
+        }
+    }
+}
+
+/**********************************************************************************
+ * Command #5, status report
+ *********************************************************************************/
+fn status_report(entities: &EntityColl, pi: &PlayerInfo) {
+    if pi.damage[SubSystem::Computers] < 0. {
+        println!("No reports are able to get through, {}.", pi.name);
+    } else if pi.crew <= 3 {
+        println!("No one left to give the report, {}.", pi.name);
+    } else {
+        println!("");
+        println!("# of enemy ships left...{}", count_all_of(entities, EType::Ship));
+        println!("# of power units left...{}", pi.power);
+        println!("# of torpedos  left.....{}", pi.torpedos);
+        println!("# of missiles left......{}", pi.missiles);
+        println!("# of crewmen left.......{}", pi.crew);
+        println!("LBS. of fuel left.......{}", pi.fuel);
+        println!();
+        println!("    SYSTEM       HEALTH  (negative is bad)");
+        println!("    ------       ------");
+        for (key, value) in pi.damage {
+            println!("    {:12} {:2.4}", format!("{:?}", key), value);
+        }
+    }
+}
+
+/**********************************************************************************
+ * Command #9, surrender
+ *********************************************************************************/
+fn surrender(player_info: &mut PlayerInfo) {
+    println!("Coward!  You're not very patriotic, {}.", player_info.name);
+    player_info.alive = false;
 }
 
 fn resolve_collision(e: &Entity, crashee: &Entity) -> EResolution {
@@ -395,158 +559,6 @@ fn move_enemies(entities: &mut EntityColl) {
     entities.extend(unmoved.into_iter());
 }
 
-fn status_report(entities: &EntityColl, pi: &PlayerInfo) {
-    if pi.damage[SubSystem::Computers] > 0. {
-        println!("No reports are able to get through, {}.", pi.name);
-    } else if pi.crew <= 3 {
-        println!("No one left to give the report, {}.", pi.name);
-    } else {
-        println!("");
-        println!("# of enemy ships left...{}", count_all_of(entities, EType::Ship));
-        println!("# of power units left...{}", pi.power);
-        println!("# of torpedos  left.....{}", pi.torpedos);
-        println!("# of missiles left......{}", pi.missiles);
-        println!("# of crewmen left.......{}", pi.crew);
-        println!("LBS. of fuel left.......{}", pi.fuel);
-        println!();
-        println!("    SYSTEM       HEALTH  (negative is bad)");
-        println!("    ------       ------");
-        for (key, value) in pi.damage {
-            println!("    {:12} {:2.4}", format!("{:?}", key), value);
-        }
-    }
-}
-
-fn get_command(player_info: &PlayerInfo) -> Command {
-    let prompt_str = &format!("What are your orders, {}", player_info.name);
-    loop {
-        use Command::*;
-        let input = prompt(prompt_str);
-        match input.parse::<i32>() {
-            Ok(v) => match v {
-                1 => return Sonar,
-                2 => return Torpedo,
-                5 => return Status,
-                9 => return Surrender,
-                _ => {}
-            }
-            Err(e) => {}
-        }
-        println!("The Commands are:");
-        println!("      0: Navigation");
-        println!("      1: Sonar");
-        println!("      2: Torpedo");
-        println!("      5: Status");
-        println!("      9: Surrender");
-    }
-}
-
-fn get_raw_direction() -> (i8, i8) {
-    // Prompt the player for a direction for navigation, sonar, or weapons.
-    loop {
-        let input = prompt("What direction");
-        match input.parse::<i32>() {
-            Ok(v) => match v {
-                1 => return (-1, 1),
-                2 => return (0, 1),
-                3 => return (1, 1),
-                4 => return (-1, 0),
-                6 => return (1, 0),
-                7 => return (-1, -1),
-                8 => return (0, -1),
-                9 => return (1, -1),
-                _ => ()
-            }
-            _ => ()
-        }
-        println!("The Directions are:");
-        println!(" 7 8 9");
-        println!("  \\|/");
-        println!(" 4-*-6");
-        println!("  /|\\");
-        println!(" 1 2 3");
-    }
-}
-
-fn fire_torpedo(entities: &mut EntityColl, pi: &mut PlayerInfo) {
-    if pi.damage[SubSystem::Torpedos] > 0. {
-        println!("Torpedo tubes are under repair, {}.", pi.name);
-    } else if pi.crew < 10 {
-        println!("Not enough crew to fire torpedos, {}.", pi.name);
-    } else if pi.torpedos == 0 {
-        println!("No torpedos left, {}.", pi.name);
-    } else if pi.depth >= 2000 && thread_rng().next_f32() > 0.5 {
-        println!("Pressure implodes sub upon firing... You're crushed!!");
-        pi.alive = false;
-    } else {
-        pi.torpedos -= 1;
-        pi.power -= 150;
-
-        let (dx, dy) = get_raw_direction();
-        // Note:  Docs say range is 7-13, but equation below does not match.
-        let mut range = 7 - (thread_rng().next_f32()*5.).round() as i32;
-        if pi.depth > 50 {
-            range = range + 5;
-        }
-
-        let mut success = false;
-        let Position{mut x, mut y} = get_player_pos(entities).unwrap();
-        for _ in 0..range {
-            x = x.wrapping_add(dx as usize);
-            y = y.wrapping_add(dy as usize);
-            if x >= WIDTH || y >= WIDTH {
-                println!("Torpedo out of range... Ineffectual {}", pi.name);
-                break;
-            }
-
-            // Add some suspense
-            print!("..!..");
-            stdout().flush().unwrap();
-            thread::sleep(time::Duration::from_millis(500));
-
-            if let Some(e) = get_collision(entities, x, y) {
-                resolve_torpedo(e, entities, pi);
-                success = true;
-                break;
-            }
-        }
-        if !success {
-            println!("Dud.");
-        }
-    }
-}
-
-fn resolve_torpedo(e: Entity, entities: &mut EntityColl, pi: &mut PlayerInfo) {
-    use EType::*;
-    match e.etype {
-        Player => {
-            panic!("How did you torpedo yourself?!?");
-        }
-        Island => {
-            println!("You took out some island, {}.", pi.name);
-        }
-        Ship => {
-            println!("Ouch!  You got one, {}!", pi.name);
-        }
-        Mine => {
-            println!("BLAM!!  Shot wasted on a mine.");
-            entities.push_back(e);
-        }
-        HQ => {
-            println!("You blew up your headquarters, {}!", pi.name);
-        }
-        Monster => {
-            println!("A sea monster had a torpedo for lunch!");
-            entities.push_back(e);
-        }
-    }
-}
-
-fn surrender(player_info: &mut PlayerInfo) {
-    println!("Coward!  You're not very patriotic, {}.", player_info.name);
-    player_info.alive = false;
-}
-
 fn main() {
     let mut entities = setup();
     let mut player_info = PlayerInfo::new();
@@ -558,7 +570,7 @@ fn main() {
         loop {
             use Command::*;
             match get_command(&player_info) {
-                Sonar => print_map(&entities),
+                Sonar => sonar(&entities),
                 Status => status_report(&entities, &player_info),
                 Torpedo => {
                     fire_torpedo(&mut entities, &mut player_info);
@@ -573,12 +585,13 @@ fn main() {
         // Player may have destroyed itself, surrendered, or won.
         if !player_info.alive {
             break;
-        }
-        if ships == 0 {
+        } else if ships == 0 {
             println!("You Won!  All hail {} the glorious!!", player_info.name);
             break;
+        } else {
+            // retaliation(&entities, &mut player_info);
+            move_enemies(&mut entities);
         }
-        move_enemies(&mut entities);
     }
     let ships = count_all_of(&entities, EType::Ship);
     if ships > 0 {
