@@ -1,6 +1,10 @@
 extern crate rand;
 use rand::{Rng, thread_rng};
 
+// Magic to generate random SubSystem.
+#[macro_use]
+extern crate rand_derive;
+
 extern crate enum_map;
 use enum_map::EnumMap;
 
@@ -20,7 +24,7 @@ enum Command {
     Surrender,
 }
 
-#[derive(Debug, EnumMap)]
+#[derive(Debug, EnumMap, Rand)]
 enum SubSystem {
     Engines,
     Sonar,
@@ -75,6 +79,17 @@ impl PlayerInfo {
 struct Position {
     x: usize,
     y: usize,
+}
+
+impl Position {
+    fn distance(&self, other: &Position, range: f32) -> Option<f32> {
+        let dx = ((self.x as f32 - other.x as f32)).abs();
+        let dy = ((self.y as f32 - other.y as f32)).abs();
+        if dx <= range && dy <= range {
+            return Some((dx*dx + dy*dy).sqrt());
+        }
+        None
+    }
 }
 
 #[derive(PartialEq, Clone, Debug)]
@@ -140,6 +155,11 @@ fn count_all_of(entities: &EntityColl, etype: EType) -> u32 {
     entities.iter().
          map(|e: &Entity| if e.etype == etype {1} else {0}).
          fold(0, |acc, ship| acc+ship)
+}
+
+// Shorthand function, Original BASIC code uses this a lot.
+fn rnd() -> f32 {
+    thread_rng().next_f32()
 }
 
 fn change_direction(mut e: Entity) -> Entity {
@@ -260,7 +280,7 @@ fn get_command(player_info: &PlayerInfo) -> Command {
                 9 => return Surrender,
                 _ => {}
             }
-            Err(e) => {}
+            Err(_) => {}
         }
         println!("The Commands are:");
         println!("      0: Navigation");
@@ -336,7 +356,7 @@ fn fire_torpedo(entities: &mut EntityColl, pi: &mut PlayerInfo) {
         println!("Not enough crew to fire torpedos, {}.", pi.name);
     } else if pi.torpedos == 0 {
         println!("No torpedos left, {}.", pi.name);
-    } else if pi.depth >= 2000 && thread_rng().next_f32() > 0.5 {
+    } else if pi.depth >= 2000 && rnd() > 0.5 {
         println!("Pressure implodes sub upon firing... You're crushed!!");
         pi.alive = false;
     } else {
@@ -345,14 +365,14 @@ fn fire_torpedo(entities: &mut EntityColl, pi: &mut PlayerInfo) {
 
         let (dx, dy) = get_direction();
         // Note:  Docs say range is 7-13, but equation below does not match.
-        let mut range = 7 - (thread_rng().next_f32()*5.).round() as i32;
+        let mut range = 7 - (rnd()*5.).round() as i32;
         if pi.depth > 50 {
             range = range + 5;
         }
 
         let mut success = false;
         let Position{mut x, mut y} = get_player_pos(entities).unwrap();
-        for _ in 0..range {
+        for i in 0..range {
             x = x.wrapping_add(dx as usize);
             y = y.wrapping_add(dy as usize);
             if x >= WIDTH || y >= WIDTH {
@@ -361,7 +381,7 @@ fn fire_torpedo(entities: &mut EntityColl, pi: &mut PlayerInfo) {
             }
 
             // Add some suspense
-            print!("..!..");
+            print!("..{}..\r", i);
             stdout().flush().unwrap();
             thread::sleep(time::Duration::from_millis(500));
 
@@ -426,6 +446,7 @@ fn status_report(entities: &EntityColl, pi: &PlayerInfo) {
             println!("    {:12} {:2.4}", format!("{:?}", key), value);
         }
     }
+    // println!("You are at {?:}", pi.pos);
 }
 
 /**********************************************************************************
@@ -434,6 +455,49 @@ fn status_report(entities: &EntityColl, pi: &PlayerInfo) {
 fn surrender(player_info: &mut PlayerInfo) {
     println!("Coward!  You're not very patriotic, {}.", player_info.name);
     player_info.alive = false;
+}
+
+/**********************************************************************************
+ * Enemy movement
+ *********************************************************************************/
+fn move_enemies(entities: &mut EntityColl) {
+    let mut moved = EntityColl::with_capacity(entities.len());
+    let mut unmoved = EntityColl::with_capacity(entities.len());
+
+    // Non-moving entities get precedence
+    // Might be able to ensure this based on initial order and
+    // the generic movement function.
+    while let Some(e) = entities.pop_front() {
+        if e.components.is_empty() {
+            moved.push_back(e);
+        } else {
+            unmoved.push_back(e);
+        }
+    }
+
+    while unmoved.len() != 0 {
+        let unmoved_len = unmoved.len();
+        for _i in 0..unmoved_len {
+            let e = unmoved.pop_front().unwrap();
+            move_enemy(e, &mut unmoved, &mut moved);
+        }
+        if unmoved_len == unmoved.len() {
+            // Either un-moved entities are trying to move through
+            // each other, or an un-moved entity is blocked by moved
+            // entities.
+            println!("Stalemate");
+            // Change direction of remaining unmoved entities
+            for e in &mut unmoved {
+                e.components[0] = Component::new_vel();
+                // println!("New velocity: {:?}", e.components[0]);
+            }
+            // Better luck next time
+            break;
+        }
+    }
+    // TODO:  Filter out dead entities
+    entities.extend(moved.into_iter());
+    entities.extend(unmoved.into_iter());
 }
 
 fn resolve_collision(e: &Entity, crashee: &Entity) -> EResolution {
@@ -519,44 +583,77 @@ fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) {
     }
 }
 
-fn move_enemies(entities: &mut EntityColl) {
-    let mut moved = EntityColl::with_capacity(entities.len());
-    let mut unmoved = EntityColl::with_capacity(entities.len());
-
-    // Non-moving entities get precedence
-    // Might be able to ensure this based on initial order and
-    // the generic movement function.
-    while let Some(e) = entities.pop_front() {
-        if e.components.is_empty() {
-            moved.push_back(e);
-        } else {
-            unmoved.push_back(e);
-        }
-    }
-
-    while unmoved.len() != 0 {
-        let unmoved_len = unmoved.len();
-        for _i in 0..unmoved_len {
-            let e = unmoved.pop_front().unwrap();
-            move_enemy(e, &mut unmoved, &mut moved);
-        }
-        if unmoved_len == unmoved.len() {
-            // Either un-moved entities are trying to move through
-            // each other, or an un-moved entity is blocked by moved
-            // entities.
-            println!("Stalemate");
-            // Change direction of remaining unmoved entities
-            for e in &mut unmoved {
-                e.components[0] = Component::new_vel();
-                // println!("New velocity: {:?}", e.components[0]);
+/**********************************************************************************
+ * Enemy attacks
+ *********************************************************************************/
+fn retaliation(entities: &EntityColl, pi: &mut PlayerInfo) {
+    let mut threat = 0f32;
+    let ppos = get_player_pos(entities).unwrap();
+    for e in entities {
+        if e.etype == EType::Ship {
+            if let Some(dist) = ppos.distance(&e.pos, 4f32) {
+                println!("Enemy ship at {:?} firing...", e.pos);
+                threat += rnd() / dist;
             }
-            // Better luck next time
-            break;
         }
     }
-    // TODO:  Filter out dead entities
-    entities.extend(moved.into_iter());
-    entities.extend(unmoved.into_iter());
+    println!("Threat: {}", threat);
+
+    let mut power_drain = 0;
+    let mut system_count = 0;
+    let mut damage = 0f32;
+
+    if threat != 0. {
+        println!("Depth charges off {} side, {}!",
+                 if rnd() > 0.5 { "port" } else { "starboard" },
+                 pi.name);
+        if threat <= 0.13 && rnd() <= 0.92 {
+            println!("No real damage sustained, {}.", pi.name);
+        } else if threat <= 0.36 && rnd() <= 0.96 {
+            println!("Light, superficial damage sustained, {}!", pi.name);
+            power_drain = 50;
+            system_count = 1;
+            damage = 2.;
+        } else if threat <= 0.6 && rnd() <= 0.975 {
+            println!("Moderate damange, repairs needed, {}!!", pi.name);
+            power_drain = 75 + (rnd()*30.) as u32;
+            system_count = 2;
+            damage = 8.;
+        } else if threat <= 0.9 && rnd() <= 0.983 {
+            println!("Heavy damage!! Repairs immediate, {}!!", pi.name);
+            power_drain = 200 + (rnd()*76.) as u32;
+            system_count = 4;
+            damage = 9.;
+        } else {
+            println!("Damage Critical!!!  We need help!!!");
+            println!("Send 'HELP' in code.  Here is the code: ");
+            print!("QOIJ");
+            stdout().flush().unwrap();
+            thread::sleep(time::Duration::from_millis(500));
+            print!("XXXX");
+            power_drain = 200 + (rnd()*76.) as u32;
+            system_count = 4;
+            damage = 11.;
+        }
+    }
+
+    pi.power = pi.power.saturating_sub(power_drain);
+    for _ in 0..system_count {
+        let damaged_system: SubSystem = thread_rng().gen();
+        pi.damage[damaged_system] -= rnd() * damage;
+    }
+}
+
+fn repair(pi: &mut PlayerInfo) {
+    for (key, value) in pi.damage {
+        if value < 3. {
+            let mut repair = rnd() * (2.+rnd()*2.);
+            if pi.depth < 51 || pi.depth > 2000 {
+                repair *= 2.;
+            }
+            pi.damage[key] = value + repair;
+        }
+    }
 }
 
 fn main() {
@@ -589,8 +686,12 @@ fn main() {
             println!("You Won!  All hail {} the glorious!!", player_info.name);
             break;
         } else {
-            // retaliation(&entities, &mut player_info);
+            retaliation(&entities, &mut player_info);
+            if !player_info.alive {
+                break;
+            }
             move_enemies(&mut entities);
+            repair(&mut player_info);
         }
     }
     let ships = count_all_of(&entities, EType::Ship);
