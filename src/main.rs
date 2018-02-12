@@ -20,8 +20,9 @@ const HEIGHT: usize = 20;
 enum Command {
     Navigate,
     Sonar,
-    Status,
     Torpedo,
+    Manuever,
+    Status,
     Resupply,
     Surrender,
 }
@@ -43,7 +44,7 @@ struct PlayerInfo {
     name: String,
     alive: bool,
     damage: EnumMap<SubSystem, f32>,
-    depth: u32,
+    depth: i32,
     crew: u32,
     power: u32,
     fuel: u32,
@@ -297,6 +298,7 @@ fn get_command(player_info: &PlayerInfo) -> Command {
                 0 => return Navigate,
                 1 => return Sonar,
                 2 => return Torpedo,
+                4 => return Manuever,
                 5 => return Status,
                 6 => return Resupply,
                 9 => return Surrender,
@@ -308,6 +310,7 @@ fn get_command(player_info: &PlayerInfo) -> Command {
         println!("      0: Navigate");
         println!("      1: Sonar");
         println!("      2: Torpedo");
+        println!("      4: Manuever");
         println!("      5: Status");
         println!("      6: Resupply");
         println!("      9: Surrender");
@@ -475,7 +478,7 @@ fn get_power(avail: u32) -> u32 {
 /**********************************************************************************
  * Command #1, sonar
  *********************************************************************************/
-fn sonar(entities: &EntityColl, pi: &mut PlayerInfo) {
+fn sonar(entities: &EntityColl, pi: &mut PlayerInfo) -> bool {
     if pi.damage[SubSystem::Sonar] < 0. {
         println!("Sonar is under repair.");
     } else if pi.crew <= 5 {
@@ -507,6 +510,7 @@ fn sonar(entities: &EntityColl, pi: &mut PlayerInfo) {
         // Same power cost for map and linear sonar
         pi.power = pi.power.saturating_sub(50);
     }
+    false
 }
 
 /**********************************************************************************
@@ -591,9 +595,37 @@ fn resolve_torpedo(e: Entity, entities: &mut EntityColl, pi: &mut PlayerInfo) {
 }
 
 /**********************************************************************************
+ * Command #4, Manuever
+ *********************************************************************************/
+fn manuever(pi: &mut PlayerInfo) -> bool {
+    if pi.damage[SubSystem::Computers] < 0. {
+        println!("Ballast controls are being repaired {}.", pi.name);
+        return false;
+    }
+    if pi.crew <= 12 {
+        println!("There are not enough crew to work the controls, {}.", pi.name);
+        return false;
+    }
+    loop {
+        let input = prompt ("New depth");
+        if let Ok(depth) = input.parse::<i32>() {
+            if depth >= 0 && depth < 3000 {
+                let power_used = ((depth - pi.depth).abs() as u32 + 1) / 2;
+                pi.power = pi.power.saturating_sub(power_used);
+                pi.depth = depth;
+            } else {
+                println!("Hull crushed by pressure, {}!!", pi.name);
+                pi.alive = false;
+            }
+            return true
+        }
+    }
+}
+
+/**********************************************************************************
  * Command #5, status report
  *********************************************************************************/
-fn status_report(entities: &EntityColl, pi: &PlayerInfo) {
+fn status_report(entities: &EntityColl, pi: &PlayerInfo) -> bool {
     if pi.damage[SubSystem::Computers] < 0. {
         println!("No reports are able to get through, {}.", pi.name);
     } else if pi.crew <= 3 {
@@ -613,7 +645,9 @@ fn status_report(entities: &EntityColl, pi: &PlayerInfo) {
             println!("    {:12} {:2.4}", format!("{:?}", key), value);
         }
     }
-    // println!("You are at {?:}", pi.pos);
+    println!("You are at {:?}", get_first_pos(entities, EType::Player).unwrap());
+    println!("Depth: {}", pi.depth);
+    false
 }
 
 /**********************************************************************************
@@ -634,6 +668,7 @@ fn resupply(entities: &EntityColl, pi: &mut PlayerInfo) -> bool {
                 if pi.missiles < 2 { pi.missiles = 2; }
                 if pi.fuel < 1500 { pi.fuel = 1500; }
                 if pi.crew < 25 { pi.crew = 25; }
+                println!("Divers from headquarters bring out supplies and men.");
                 turn_over = true;
             }
         }
@@ -647,9 +682,10 @@ fn resupply(entities: &EntityColl, pi: &mut PlayerInfo) -> bool {
 /**********************************************************************************
  * Command #9, surrender
  *********************************************************************************/
-fn surrender(player_info: &mut PlayerInfo) {
+fn surrender(player_info: &mut PlayerInfo) -> bool {
     println!("Coward!  You're not very patriotic, {}.", player_info.name);
     player_info.alive = false;
+    true
 }
 
 /**********************************************************************************
@@ -698,6 +734,7 @@ fn move_enemies(entities: &mut EntityColl) {
 fn resolve_collision(e: &Entity, crashee: &Entity) -> EResolution {
     use EType::*;
     match e.etype {
+        // TODO:  Ships and monsters can kill players and HQ
         Ship => match crashee.etype {
             Island | Ship | Player | HQ => {
                 println!("{:?} changed direction to avoid {:?}",
@@ -861,28 +898,17 @@ fn main() {
                  ships, player_info.name);
         loop {
             use Command::*;
-            match get_command(&player_info) {
-                Navigate => {
-                    if navigate(&mut entities, &mut player_info) {
-                        break;
-                    }
-                }
+            let done = match get_command(&player_info) {
+                Navigate => navigate(&mut entities, &mut player_info),
                 Sonar => sonar(&entities, &mut player_info),
-                Torpedo => {
-                    if fire_torpedo(&mut entities, &mut player_info) {
-                        break;
-                    }
-                },
+                Torpedo => fire_torpedo(&mut entities, &mut player_info),
+                Manuever => manuever(&mut player_info),
                 Status => status_report(&entities, &player_info),
-                Resupply => {
-                    if resupply(&entities, &mut player_info) {
-                        break;
-                    }
-                },
-                Surrender => {
-                    surrender(&mut player_info);
-                    break;
-                },
+                Resupply => resupply(&entities, &mut player_info),
+                Surrender => surrender(&mut player_info),
+            };
+            if done {
+                break;
             }
         }
         // Various commands use power.  Maybe too much.
