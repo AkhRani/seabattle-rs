@@ -24,6 +24,8 @@ enum Command {
     Manuever,
     Status,
     Resupply,
+    // Sabotage
+    Convert,
     Surrender,
 }
 
@@ -301,6 +303,7 @@ fn get_command(player_info: &PlayerInfo) -> Command {
                 4 => return Manuever,
                 5 => return Status,
                 6 => return Resupply,
+                8 => return Convert,
                 9 => return Surrender,
                 _ => {}
             }
@@ -313,6 +316,7 @@ fn get_command(player_info: &PlayerInfo) -> Command {
         println!("      4: Manuever");
         println!("      5: Status");
         println!("      6: Resupply");
+        println!("      8: Convert Power");
         println!("      9: Surrender");
     }
 }
@@ -485,9 +489,10 @@ fn sonar(entities: &EntityColl, pi: &mut PlayerInfo) -> bool {
         println!("Not enough crew to operate sonar.");
     } else {
         // TODO:  linear vs map.
-        let mut tiles = [["   "; WIDTH]; HEIGHT];
+        let mut tiles = [["  "; WIDTH]; HEIGHT];
         for e in entities.iter() {
             // TODO:  Sonar noise
+            /*
             tiles[e.pos.x][e.pos.y] = match e.etype {
                 EType::Player => "(X)",
                 EType::Island => "***",
@@ -496,9 +501,18 @@ fn sonar(entities: &EntityColl, pi: &mut PlayerInfo) -> bool {
                 EType::HQ => "-H-",
                 EType::Monster => "SSS",
             }
+            */
+            tiles[e.pos.x][e.pos.y] = match e.etype {
+                EType::Player => "==",
+                EType::Island => "%%",
+                EType::Ship => "<>",
+                EType::Mine => " *",
+                EType::HQ => "HQ",
+                EType::Monster => "SS",
+            }
         }
 
-        println!("{}", ".".repeat(WIDTH*3+2));
+        println!("{}", ".".repeat(WIDTH*2+2));
         for y in 0..HEIGHT {
             print!(".");
             for x in 0..WIDTH {
@@ -506,7 +520,7 @@ fn sonar(entities: &EntityColl, pi: &mut PlayerInfo) -> bool {
             }
             println!(".");
         }
-        println!("{}", ".".repeat(WIDTH*3+2));
+        println!("{}", ".".repeat(WIDTH*2+2));
         // Same power cost for map and linear sonar
         pi.power = pi.power.saturating_sub(50);
     }
@@ -535,7 +549,7 @@ fn fire_torpedo(entities: &mut EntityColl, pi: &mut PlayerInfo) -> bool {
 
         let (dx, dy) = get_direction();
         // Note:  Docs say range is 7-13, but equation below does not match.
-        let mut range = 7 - (rnd()*5.).round() as i32;
+        let mut range = 7 - (rnd()*4.).round() as i32;
         if pi.depth > 50 {
             range = range + 5;
         }
@@ -680,18 +694,73 @@ fn resupply(entities: &EntityColl, pi: &mut PlayerInfo) -> bool {
 }
 
 /**********************************************************************************
+ * Command #8, Convert power to fuel or fuel to power
+ *********************************************************************************/
+fn convert_power_or_fuel(pi: &mut PlayerInfo) -> bool {
+    if pi.damage[SubSystem::Converter] < 0. {
+        println!("Power Converter is off line, {}.", pi.name);
+        return false;
+    }
+    if pi.crew <=5 {
+        println!("Not enough men to work the converter, {}.", pi.name);
+        return false;
+    }
+
+    loop {
+        let input = prompt("Option?  (1=Fuel to Power, 2=Power to Fuel");
+        if input == "1" {
+            convert_fuel_to_power(pi);
+            break;
+        } else if input == "2" {
+            convert_power_to_fuel(pi);
+            break;
+        }
+    }
+    println!("Conversion complete.  Power={}.  Fuel={}", pi.power, pi.fuel);
+    true
+}
+
+fn convert_power_to_fuel(pi: &mut PlayerInfo) {
+    let prompt_str = &format!("Power available: {}.  Convert", pi.power-1);
+    loop {
+        let input = prompt(prompt_str);
+        if let Ok(power) = input.parse::<u32>() {
+            if power < pi.power {
+                pi.power -= power;
+                pi.fuel += power * 3;
+                break;
+            }
+        }
+    }
+}
+
+fn convert_fuel_to_power(pi: &mut PlayerInfo) {
+    let prompt_str = &format!("Fuel available: {}.  Convert", pi.fuel);
+    loop {
+        let input = prompt(prompt_str);
+        if let Ok(fuel) = input.parse::<u32>() {
+            if fuel <= pi.fuel {
+                pi.fuel -= fuel;
+                pi.power += fuel / 3;
+                break;
+            }
+        }
+    }
+}
+
+/**********************************************************************************
  * Command #9, surrender
  *********************************************************************************/
-fn surrender(player_info: &mut PlayerInfo) -> bool {
-    println!("Coward!  You're not very patriotic, {}.", player_info.name);
-    player_info.alive = false;
+fn surrender(pi: &mut PlayerInfo) -> bool {
+    println!("Coward!  You're not very patriotic, {}.", pi.name);
+    pi.alive = false;
     true
 }
 
 /**********************************************************************************
  * Enemy movement
  *********************************************************************************/
-fn move_enemies(entities: &mut EntityColl) {
+fn move_enemies(entities: &mut EntityColl, pi: &mut PlayerInfo) {
     let mut moved = EntityColl::with_capacity(entities.len());
     let mut unmoved = EntityColl::with_capacity(entities.len());
 
@@ -710,7 +779,9 @@ fn move_enemies(entities: &mut EntityColl) {
         let unmoved_len = unmoved.len();
         for _i in 0..unmoved_len {
             let e = unmoved.pop_front().unwrap();
-            move_enemy(e, &mut unmoved, &mut moved);
+            if move_enemy(e, &mut unmoved, &mut moved) {
+                pi.alive = false;
+            }
         }
         if unmoved_len == unmoved.len() {
             // Either un-moved entities are trying to move through
@@ -733,47 +804,76 @@ fn move_enemies(entities: &mut EntityColl) {
 
 fn resolve_collision(e: &Entity, crashee: &Entity) -> EResolution {
     use EType::*;
+    use EResolution::*;
     match e.etype {
-        // TODO:  Ships and monsters can kill players and HQ
         Ship => match crashee.etype {
-            Island | Ship | Player | HQ => {
-                println!("{:?} changed direction to avoid {:?}",
-                         e.etype, crashee.etype);
-                return EResolution::MoverChangeDirection;
+            Island | Ship => {
+                println!("Enemy ship changed direction to avoid {:?}",
+                         crashee.etype);
+                MoverChangeDirection
+            },
+            Player => {
+                println!("You've been rammed by a ship!");
+                CrasheeDestroyed
+            },
+            HQ => {
+                println!("Your headquarters was rammed!");
+                CrasheeDestroyed
             },
             Mine => {
-                println!("{:?} destroyed by a mine!", e.etype);
-                return EResolution::MoverDestroyed;
+                if rnd() < 0.7 {
+                    println!("Enemy ship changed direction to avoid mine");
+                    MoverChangeDirection
+                }
+                else {
+                    println!("Enemy ship was destroyed by a mine!");
+                    MoverDestroyed
+                }
             },
             Monster => {
-                println!("{:?} eaten by a monster!", e.etype);
-                return EResolution::MoverDestroyed;
+                println!("Enemy ship was eaten by a monster!");
+                MoverDestroyed
             }
         }
         Monster => match crashee.etype {
-            Island | Player | HQ => {
-                println!("{:?} changed direction to avoid {:?}",
-                         e.etype, crashee.etype);
-                return EResolution::MoverChangeDirection;
+            Island => {
+                println!("Sea monster changed direction to avoid the island");
+                MoverChangeDirection
+            },
+            Player => {
+                println!("You've been eaten by a sea monster!");
+                CrasheeDestroyed
+            },
+            HQ => {
+                println!("A sea monster ate your headquarters!");
+                CrasheeDestroyed
             },
             Ship => {
                 println!("Ship eaten by a moving monster!");
-                return EResolution::CrasheeDestroyed;
+                CrasheeDestroyed
             },
             Mine => {
                 println!("{:?} destroyed by a mine!", e.etype);
-                return EResolution::MoverDestroyed;
+                MoverDestroyed
             },
             Monster => {
-                println!("{:?} eaten by a monster!", e.etype);
-                return EResolution::MoverDestroyed;
+                println!("A sea monster fight!!");
+                if rnd() < 0.8 {
+                    println!("It's a tie!");
+                    MoverChangeDirection
+                } else {
+                    println!("And one dies!!");
+                    MoverDestroyed
+                }
             }
         }
         _ => panic!("Unexpected mover type {:?}", e.etype)
     }
 }
 
-fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) {
+/// Return true if the player was killed as a result of enemy movement
+fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) -> bool {
+    let mut player_killed = false;
     // Calculate destination
     let Component::Velocity(dx, dy) = e.components[0];
     let x = e.pos.x.wrapping_add(dx as usize);
@@ -794,6 +894,10 @@ fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) {
                         let mut moved_entity = e;
                         moved_entity.pos = Position {x, y};
                         moved.push_back(moved_entity);
+                        // Special-case handling of player destruction
+                        if crashee.etype == EType::Player {
+                            player_killed = true;
+                        }
                     },
 
                     MoverDestroyed => moved.push_back(crashee),
@@ -813,6 +917,7 @@ fn move_enemy(e: Entity, unmoved: &mut EntityColl, moved: &mut EntityColl) {
             }
         }
     }
+    player_killed
 }
 
 /**********************************************************************************
@@ -905,6 +1010,7 @@ fn main() {
                 Manuever => manuever(&mut player_info),
                 Status => status_report(&entities, &player_info),
                 Resupply => resupply(&entities, &mut player_info),
+                Convert => convert_power_or_fuel(&mut player_info),
                 Surrender => surrender(&mut player_info),
             };
             if done {
@@ -921,15 +1027,20 @@ fn main() {
         if !player_info.alive {
             break;
         }
-        if ships == 0 {
-            println!("You Won!  All hail {} the glorious!!", player_info.name);
-            break;
-        }
         retaliation(&entities, &mut player_info);
         if !player_info.alive {
             break;
         }
-        move_enemies(&mut entities);
+        move_enemies(&mut entities, &mut player_info);
+        // Enemies might have run into player
+        if !player_info.alive {
+            break;
+        }
+        // Enemies might have run into mines
+        if count_all_of(&entities, EType::Ship) == 0 {
+            println!("You Won!  All hail {} the glorious!!", player_info.name);
+            break;
+        }
         repair(&mut player_info);
     }
     let ships = count_all_of(&entities, EType::Ship);
