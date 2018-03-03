@@ -25,7 +25,7 @@ enum Command {
     Manuever,
     Status,
     Resupply,
-    // Sabotage
+    Sabotage,
     Convert,
     Surrender,
 }
@@ -90,11 +90,19 @@ struct Position {
 }
 
 impl Position {
+    fn range(&self, other: &Position) -> (f32, f32) {
+        (((self.x as f32 - other.x as f32)).abs(),
+        ((self.y as f32 - other.y as f32)).abs())
+    }
+    fn in_range(&self, other: &Position, range: f32) -> bool {
+        let (dx, dy) = self.range(other);
+        dx <= range && dy <= range
+    }
+
     // Return the euclidian distance of the other position, but only if
     // each dimension is within the distance specified by range.
     fn distance_within(&self, other: &Position, range: f32) -> Option<f32> {
-        let dx = ((self.x as f32 - other.x as f32)).abs();
-        let dy = ((self.y as f32 - other.y as f32)).abs();
+        let (dx, dy) = self.range(other);
         if dx <= range && dy <= range {
             return Some((dx*dx + dy*dy).sqrt());
         }
@@ -307,6 +315,7 @@ fn get_command(player_info: &PlayerInfo) -> Command {
                 4 => return Manuever,
                 5 => return Status,
                 6 => return Resupply,
+                7 => return Sabotage,
                 8 => return Convert,
                 9 => return Surrender,
                 _ => {}
@@ -321,6 +330,7 @@ fn get_command(player_info: &PlayerInfo) -> Command {
         println!("      4: Manuever");
         println!("      5: Status");
         println!("      6: Resupply");
+        println!("      7: Sabotage");
         println!("      8: Convert Power");
         println!("      9: Surrender");
     }
@@ -415,11 +425,12 @@ fn navigate(entities: &mut EntityColl, pi: &mut PlayerInfo) -> bool {
                         println!("You were eaten by a sea monster, {}!", pi.name);
                         pi.alive = false;
                     } else {
-                        // Note:  In this case, the monster and the player occupy the
-                        // same position.  In the original game, if this was the final
-                        // movement of the player, the sea monster would be eliminated.
-                        // For now, I'm unconditionally eliminating the sea monster
-                        // by not putting the entity back into the pool.
+                        // Note:  In this case, the monster and the player
+                        // occupy the same position.  In the original game, if
+                        // this was the final movement of the player, the sea
+                        // monster would be eliminated.
+                        // For now, I'm unconditionally eliminating the sea
+                        // monster by not putting the entity back into the pool.
                         println!("You rammed a sea monster!  Lucky you!");
                     }
                 },
@@ -532,9 +543,9 @@ fn sonar(entities: &EntityColl, pi: &mut PlayerInfo) -> bool {
     false
 }
 
-/**********************************************************************************
+/******************************************************************************
  * Command #2, torpedo control
- *********************************************************************************/
+ ******************************************************************************/
 fn fire_torpedo(entities: &mut EntityColl, pi: &mut PlayerInfo) -> bool {
     let mut turn_over = false;
     if pi.damage[SubSystem::Torpedos] < 0. {
@@ -664,16 +675,18 @@ fn fire_missile(entities: &mut EntityColl, pi: &mut PlayerInfo) -> bool {
     }
 }
 
-fn resolve_missile(x: usize, y: usize, entities: &mut EntityColl, pi: &mut PlayerInfo) {
+fn resolve_missile(x: usize, y: usize,
+                   entities: &mut EntityColl, pi: &mut PlayerInfo) {
     let pos = Position {x, y};
     let (mut monsters, mut ships, mut mines, mut island) = (0, 0, 0, 0);
     for _i in 0..entities.len() {
         let e = entities.pop_front().unwrap();
-        if let Some(_) = pos.distance_within(&e.pos, 2f32) {
+        if let Some(_) = pos.distance_within(&e.pos, 1.) {
             use EType::*;
             match e.etype {
                 Player => {
-                    println!("You just destroyed yourself, {}!  Dummy!!", pi.name);
+                    println!("You just destroyed yourself, {}!  Dummy!!",
+                             pi.name);
                     pi.alive = false;
                     // Note:  Original code would kill player instantly.
                     // I'm going to allow the possibility of a draw.
@@ -682,7 +695,8 @@ fn resolve_missile(x: usize, y: usize, entities: &mut EntityColl, pi: &mut Playe
                 Ship => ships += 1,
                 Mine => mines += 1,
                 HQ => {
-                    println!("You've destroyed your headquarters, {}!!", pi.name);
+                    println!("You've destroyed your headquarters, {}!!",
+                             pi.name);
                 }
                 Monster => monsters += 1,
             }
@@ -704,9 +718,9 @@ fn resolve_missile(x: usize, y: usize, entities: &mut EntityColl, pi: &mut Playe
     }
 }
 
-/**********************************************************************************
+/*******************************************************************************
  * Command #4, Manuever
- *********************************************************************************/
+ ******************************************************************************/
 fn manuever(pi: &mut PlayerInfo) -> bool {
     if pi.damage[SubSystem::Computers] < 0. {
         println!("Ballast controls are being repaired {}.", pi.name);
@@ -732,9 +746,9 @@ fn manuever(pi: &mut PlayerInfo) -> bool {
     }
 }
 
-/**********************************************************************************
+/*******************************************************************************
  * Command #5, status report
- *********************************************************************************/
+ ******************************************************************************/
 fn status_report(entities: &EntityColl, pi: &PlayerInfo) -> bool {
     if pi.damage[SubSystem::Computers] < 0. {
         println!("No reports are able to get through, {}.", pi.name);
@@ -760,9 +774,9 @@ fn status_report(entities: &EntityColl, pi: &PlayerInfo) -> bool {
     false
 }
 
-/**********************************************************************************
+/******************************************************************************
  * Command #6, resupply from HQ
- *********************************************************************************/
+ ******************************************************************************/
 fn resupply(entities: &EntityColl, pi: &mut PlayerInfo) -> bool {
     let mut turn_over = false;
     if pi.damage[SubSystem::Resupply] < 0. {
@@ -792,9 +806,101 @@ fn resupply(entities: &EntityColl, pi: &mut PlayerInfo) -> bool {
     turn_over
 }
 
-/**********************************************************************************
+/******************************************************************************
+ * Command #7, sabotage surrounding ships
+ ******************************************************************************/
+fn sabotage(entities: &mut EntityColl, pi: &mut PlayerInfo) -> bool {
+    let mut turn_over = false;
+    if pi.damage[SubSystem::Sabotage] < 0. {
+        println!("Hatches inaccessible, {}.  No sabotage possible.", pi.name);
+    } else if pi.crew <= 10 {
+        println!("Not enough crew to go on a mission {}.", pi.name);
+    } else {
+        let ppos = get_first_pos(entities, EType::Player).unwrap();
+        let mut ships = Vec::new();
+        let mut nearby_monsters = false;
+        for _ in 0..entities.len() {
+            let e = entities.pop_front().unwrap();
+            if e.pos.in_range(&ppos, 2.) {
+                if e.etype == EType::Ship {
+                    ships.push(e);
+                } else {
+                    if e.etype == EType::Monster {
+                        nearby_monsters = true;
+                    }
+                    entities.push_back(e);
+                }
+            } else {
+                entities.push_back(e);
+            }
+        }
+        if ships.len() > 0 {
+            turn_over = true;
+            println!("There are {} ships in range, {}.",
+                     ships.len(), pi.name);
+            // Q1 in original code
+            let men;
+            let prompt_str = &format!("How many men are going, {}", pi.name);
+            loop {
+                let input = prompt(prompt_str);
+                if let Ok(v) = input.parse::<u32>() {
+                    if pi.crew >= 10 + v {
+                        men = v as f32;
+                        break;
+                    } else {
+                        println!("You must leave at least 10 men on board, {}",
+                                 pi.name);
+                    }
+                }
+            }
+            // Sink Ships
+            // D3 in original code
+            let ship_count = ships.len() as f32;
+            let ratio = ship_count / men;
+            println!("ratio = {}", ratio);
+            // D6 in original code
+            let mut ships_sunk = 0;
+            for e in ships {
+                // Not sure why we need two rnd() calls here
+                if ratio > 1. - rnd() && rnd() + ratio < 0.9 {
+                    entities.push_back(e);
+                } else {
+                    ships_sunk += 1;
+                }
+            }
+            println!("{} ships were destroyed, {}.", ships_sunk, pi.name);
+            
+            // See how many men return safely.
+            let mut men_lost = 0;
+            for _ in 0..men as i32 {
+                if rnd() > 0.6 {
+                    men_lost += 1;
+                }
+            }
+            if nearby_monsters {
+                let mut men_eaten = 0;
+                for _ in 0..men as u32 - men_lost {
+                    if rnd() < 0.15 {
+                        men_eaten += 1;
+                    }
+                }
+                println!("A sea monster smells the men on the way back!!");
+                println!("{} men were eaten, {}!", men_eaten, pi.name);
+                pi.crew -= men_eaten;
+            }
+            println!("{} men were lost through accidents, {}.",
+                     men_lost, pi.name);
+            pi.crew -= men_lost;
+        } else {
+            println!("No ships in range, {}.", pi.name);
+        }
+    }
+    turn_over
+}
+
+/*******************************************************************************
  * Command #8, Convert power to fuel or fuel to power
- *********************************************************************************/
+ ******************************************************************************/
 fn convert_power_or_fuel(pi: &mut PlayerInfo) -> bool {
     if pi.damage[SubSystem::Converter] < 0. {
         println!("Power Converter is off line, {}.", pi.name);
@@ -847,18 +953,18 @@ fn convert_fuel_to_power(pi: &mut PlayerInfo) {
     }
 }
 
-/**********************************************************************************
+/*******************************************************************************
  * Command #9, surrender
- *********************************************************************************/
+ ******************************************************************************/
 fn surrender(pi: &mut PlayerInfo) -> bool {
     println!("Coward!  You're not very patriotic, {}.", pi.name);
     pi.alive = false;
     true
 }
 
-/**********************************************************************************
+/*******************************************************************************
  * Enemy movement
- *********************************************************************************/
+ ******************************************************************************/
 fn move_enemies(entities: &mut EntityColl, pi: &mut PlayerInfo) {
     let mut moved = EntityColl::with_capacity(entities.len());
     let mut unmoved = EntityColl::with_capacity(entities.len());
@@ -1110,6 +1216,7 @@ fn main() {
                 Manuever => manuever(&mut player_info),
                 Status => status_report(&entities, &player_info),
                 Resupply => resupply(&entities, &mut player_info),
+                Sabotage => sabotage(&mut entities, &mut player_info),
                 Convert => convert_power_or_fuel(&mut player_info),
                 Surrender => surrender(&mut player_info),
             };
